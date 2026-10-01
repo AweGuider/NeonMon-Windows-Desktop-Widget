@@ -6,6 +6,7 @@ NeonMon is a lightweight Windows system-monitoring widget. It stays as a thin sc
 
 - Small, medium, and large layouts.
 - CPU/GPU load and temperature, memory use, uptime, remaining disk space, GPU clocks, top CPU process, and recent GPU-timeout diagnostics.
+- Click a disk card to open that drive's root folder in File Explorer.
 - Adjustable top, right, bottom, or left docking. Click the arrow in the header to cycle edges, or use the tray menu.
 - Pin, minimize, custom control tooltips, translucent styling, and short transition animations.
 - Optional read-only HTML integration at `http://127.0.0.1:27171/api/v1/metrics`.

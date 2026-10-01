@@ -20,6 +20,13 @@ internal static class Program
         using var bridge = new MetricsBridge(() => telemetry.Latest);
         using var widget = new WidgetForm(settings, settingsStore, telemetry, bridge);
 
+        var peekPreviewIndex = Array.FindIndex(args, argument => argument.Equals("--render-peek-preview", StringComparison.OrdinalIgnoreCase));
+        if (peekPreviewIndex >= 0 && peekPreviewIndex + 1 < args.Length)
+        {
+            widget.SavePreview(args[peekPreviewIndex + 1], telemetry.Latest, WidgetSize.Large, RevealState.Peek);
+            return 0;
+        }
+
         var previewIndex = Array.FindIndex(args, argument => argument.Equals("--render-preview", StringComparison.OrdinalIgnoreCase));
         if (previewIndex >= 0 && previewIndex + 1 < args.Length)
         {

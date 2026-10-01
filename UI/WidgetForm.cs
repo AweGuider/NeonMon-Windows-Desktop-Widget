@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using System.Diagnostics;
 using NeonMon.Models;
 using NeonMon.Services;
 
@@ -30,7 +31,9 @@ internal sealed class WidgetForm : Form
     private readonly Font _valueFont = new("Consolas", 13.5f, FontStyle.Regular, GraphicsUnit.Point);
     private readonly Font _uptimeFont = new("Consolas", 17f, FontStyle.Regular, GraphicsUnit.Point);
     private readonly Font _headerFont = new("Segoe UI", 7.5f, FontStyle.Bold, GraphicsUnit.Point);
+    private readonly Font _iconFont = new("Segoe UI Symbol", 10.5f, FontStyle.Bold, GraphicsUnit.Point);
     private readonly Dictionary<WidgetSize, Rectangle> _sizeHitAreas = [];
+    private readonly Dictionary<string, Rectangle> _driveHitAreas = [];
     private Rectangle _dockHitArea;
     private Rectangle _pinHitArea;
     private Rectangle _hideHitArea;
@@ -161,12 +164,16 @@ internal sealed class WidgetForm : Form
 
     protected override bool ShowWithoutActivation => true;
 
-    internal void SavePreview(string path, TelemetrySnapshot snapshot, WidgetSize size = WidgetSize.Large)
+    internal void SavePreview(
+        string path,
+        TelemetrySnapshot snapshot,
+        WidgetSize size = WidgetSize.Large,
+        RevealState state = RevealState.Open)
     {
-        _state = RevealState.Open;
+        _state = state;
         _settings.Size = size;
         _snapshot = snapshot;
-        Size = GetTargetSize(RevealState.Open);
+        Size = GetTargetSize(state);
         _ = Handle;
         ApplyWindowRegion();
 
@@ -334,6 +341,15 @@ internal sealed class WidgetForm : Form
         if (_state == RevealState.Open)
         {
             var point = args.Location;
+            foreach (var drive in _driveHitAreas)
+            {
+                if (drive.Value.Contains(point))
+                {
+                    OpenDrive(drive.Key);
+                    return;
+                }
+            }
+
             if (_exitHitArea.Contains(point))
             {
                 _exiting = true;
@@ -403,6 +419,22 @@ internal sealed class WidgetForm : Form
             _ => DockEdge.Top
         };
         SetDockEdge(next);
+    }
+
+    private void OpenDrive(string driveName)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = driveName + Path.DirectorySeparatorChar,
+                UseShellExecute = true
+            });
+        }
+        catch
+        {
+            _tray.ShowBalloonTip(2500, "NeonMon", $"Could not open {driveName}.", ToolTipIcon.Warning);
+        }
     }
 
     private void UpdateMenuChecks()
@@ -566,9 +598,18 @@ internal sealed class WidgetForm : Form
         string? text = null;
         if (point is not null)
         {
+            foreach (var drive in _driveHitAreas)
+            {
+                if (drive.Value.Contains(point.Value))
+                {
+                    text = $"Open {drive.Key} in File Explorer";
+                    break;
+                }
+            }
+
             foreach (var hit in _sizeHitAreas)
             {
-                if (hit.Value.Contains(point.Value))
+                if (text is null && hit.Value.Contains(point.Value))
                 {
                     text = $"Use the {hit.Key.ToString().ToLowerInvariant()} layout";
                     break;
@@ -592,6 +633,8 @@ internal sealed class WidgetForm : Form
                 text = "Exit NeonMon";
             }
         }
+
+        Cursor = text is null ? Cursors.Default : Cursors.Hand;
 
         if (text == _hoveredTooltip)
         {
@@ -659,6 +702,19 @@ internal sealed class WidgetForm : Form
     private void DrawPeek(Graphics graphics)
     {
         DrawBackground(graphics, 8);
+        var scale = DeviceDpi / 96f;
+        var inset = 2.5f * scale;
+        var outlineBounds = new RectangleF(
+            inset,
+            inset,
+            Math.Max(1, Width - 2 * inset - 1),
+            Math.Max(1, Height - 2 * inset - 1));
+        using var outline = RoundedRectangle(outlineBounds, 7 * scale);
+        using var outlineGlow = new Pen(Color.FromArgb(60, Cyan), 3.5f * scale);
+        using var outlineLine = new Pen(Color.FromArgb(230, Cyan), Math.Max(1.2f, 1.15f * scale));
+        graphics.DrawPath(outlineGlow, outline);
+        graphics.DrawPath(outlineLine, outline);
+
         using var glow = new Pen(Color.FromArgb(95, Cyan), 4f);
         using var pulse = new Pen(Cyan, 1.4f);
         var centerX = Width / 2f;
@@ -674,6 +730,7 @@ internal sealed class WidgetForm : Form
     private void DrawOpen(Graphics graphics)
     {
         DrawBackground(graphics, 13);
+        _driveHitAreas.Clear();
         DrawHeader(graphics);
 
         switch (_settings.Size)
@@ -722,7 +779,7 @@ internal sealed class WidgetForm : Form
         }
 
         _dockHitArea = new Rectangle(x + (int)(2 * scale), (int)(5 * scale), (int)(22 * scale), (int)(18 * scale));
-        DrawCenteredText(graphics, DockGlyph(), _detailFont, Ice, _dockHitArea);
+        DrawCenteredText(graphics, DockGlyph(), _iconFont, Ice, _dockHitArea);
         x += (int)Math.Round(25 * scale);
 
         _pinHitArea = new Rectangle(x + (int)(2 * scale), (int)(5 * scale), (int)(22 * scale), (int)(18 * scale));
@@ -730,7 +787,7 @@ internal sealed class WidgetForm : Form
         _hideHitArea = new Rectangle(x + (int)(27 * scale), (int)(5 * scale), (int)(22 * scale), (int)(18 * scale));
         DrawCenteredText(graphics, "—", _detailFont, Muted, _hideHitArea);
         _exitHitArea = new Rectangle(x + (int)(52 * scale), (int)(5 * scale), (int)(22 * scale), (int)(18 * scale));
-        DrawCenteredText(graphics, "×", _detailFont, Warning, _exitHitArea);
+        DrawCenteredText(graphics, "×", _iconFont, Warning, _exitHitArea);
     }
 
     private string DockGlyph() => _settings.DockEdge switch
@@ -842,6 +899,8 @@ internal sealed class WidgetForm : Form
             DrawMetric(graphics, area, "DISK FREE", "—", null, null);
             return;
         }
+
+        _driveHitAreas[drive.Name] = Rectangle.Ceiling(area);
 
         DrawMetric(
             graphics,
@@ -981,6 +1040,7 @@ internal sealed class WidgetForm : Form
             _valueFont.Dispose();
             _uptimeFont.Dispose();
             _headerFont.Dispose();
+            _iconFont.Dispose();
         }
 
         base.Dispose(disposing);

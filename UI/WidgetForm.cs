@@ -161,10 +161,10 @@ internal sealed class WidgetForm : Form
 
     protected override bool ShowWithoutActivation => true;
 
-    internal void SavePreview(string path, TelemetrySnapshot snapshot)
+    internal void SavePreview(string path, TelemetrySnapshot snapshot, WidgetSize size = WidgetSize.Large)
     {
         _state = RevealState.Open;
-        _settings.Size = WidgetSize.Large;
+        _settings.Size = size;
         _snapshot = snapshot;
         Size = GetTargetSize(RevealState.Open);
         _ = Handle;
@@ -497,7 +497,7 @@ internal sealed class WidgetForm : Form
 
         return Logical(_settings.Size switch
         {
-            WidgetSize.Small => new Size(380, 80),
+            WidgetSize.Small => new Size(380, 88),
             WidgetSize.Medium => new Size(580, 124),
             _ => new Size(780, 190)
         });
@@ -791,24 +791,34 @@ internal sealed class WidgetForm : Form
 
     private void DrawUptime(Graphics graphics, RectangleF area, bool compact)
     {
-        DrawText(graphics, "UPTIME", _labelFont, Muted, new RectangleF(area.X, area.Y, area.Width, 12));
+        var scale = DeviceDpi / 96f;
+        var labelHeight = TextLineHeight(graphics, _labelFont, 2 * scale);
+        var valueFont = compact ? _valueFont : _uptimeFont;
+        var valueHeight = TextLineHeight(graphics, valueFont, 2 * scale);
+
+        DrawText(graphics, "UPTIME", _labelFont, Muted, new RectangleF(area.X, area.Y, area.Width, labelHeight));
         var value = compact
             ? $"{(int)_snapshot.Uptime.TotalDays:00}:{_snapshot.Uptime.Hours:00}:{_snapshot.Uptime.Minutes:00}"
             : $"{(int)_snapshot.Uptime.TotalDays:00}:{_snapshot.Uptime.Hours:00}:{_snapshot.Uptime.Minutes:00}:{_snapshot.Uptime.Seconds:00}";
-        DrawText(graphics, value, compact ? _valueFont : _uptimeFont, Ice, new RectangleF(area.X, area.Y + 11, area.Width, 25));
+        var valueTop = area.Y + labelHeight;
+        DrawText(graphics, value, valueFont, Ice, new RectangleF(area.X, valueTop, area.Width, valueHeight));
         if (!compact)
         {
-            DrawText(graphics, "days · hrs · min · sec", _detailFont, Muted, new RectangleF(area.X, area.Y + 38, area.Width, 14));
+            var detailHeight = TextLineHeight(graphics, _detailFont, 2 * scale);
+            DrawText(graphics, "days · hrs · min · sec", _detailFont, Muted, new RectangleF(area.X, valueTop + valueHeight, area.Width, detailHeight));
         }
     }
 
     private void DrawMetric(Graphics graphics, RectangleF area, string label, string value, string? detail, double? percent, bool warning = false)
     {
+        var scale = DeviceDpi / 96f;
         var accent = warning ? Warning : Cyan;
-        DrawText(graphics, label, _labelFont, Muted, new RectangleF(area.X, area.Y, area.Width, 12));
-        DrawText(graphics, value, _valueFont, warning ? Warning : Foreground, new RectangleF(area.X, area.Y + 11, area.Width, 22));
+        var labelHeight = TextLineHeight(graphics, _labelFont, 2 * scale);
+        var valueHeight = TextLineHeight(graphics, _valueFont, 2 * scale);
+        DrawText(graphics, label, _labelFont, Muted, new RectangleF(area.X, area.Y, area.Width, labelHeight));
+        DrawText(graphics, value, _valueFont, warning ? Warning : Foreground, new RectangleF(area.X, area.Y + labelHeight, area.Width, valueHeight));
 
-        var track = new RectangleF(area.X, area.Y + 37, area.Width, 3);
+        var track = new RectangleF(area.X, area.Y + labelHeight + valueHeight + 2 * scale, area.Width, 3 * scale);
         using var trackBrush = new SolidBrush(Track);
         graphics.FillRectangle(trackBrush, track);
         if (percent is not null)
@@ -819,7 +829,9 @@ internal sealed class WidgetForm : Form
 
         if (!string.IsNullOrWhiteSpace(detail))
         {
-            DrawText(graphics, detail, _detailFont, warning ? Warning : Muted, new RectangleF(area.X, area.Y + 43, area.Width, 15));
+            var detailTop = track.Bottom + 5 * scale;
+            var detailHeight = TextLineHeight(graphics, _detailFont, 2 * scale);
+            DrawText(graphics, detail, _detailFont, warning ? Warning : Muted, new RectangleF(area.X, detailTop, area.Width, detailHeight));
         }
     }
 
@@ -843,14 +855,24 @@ internal sealed class WidgetForm : Form
 
     private void DrawInfoCard(Graphics graphics, RectangleF area, string label, string value, bool warning)
     {
-        using var path = RoundedRectangle(area, 7 * DeviceDpi / 96f);
+        var scale = DeviceDpi / 96f;
+        using var path = RoundedRectangle(area, 7 * scale);
         using var fill = new SolidBrush(Color.FromArgb(92, 10, 27, 34));
         using var border = new Pen(Color.FromArgb(35, 75, 226, 246));
         graphics.FillPath(fill, path);
         graphics.DrawPath(border, path);
-        DrawText(graphics, label, _labelFont, Muted, new RectangleF(area.X + 11, area.Y + 8, area.Width - 22, 13));
-        DrawText(graphics, value, _detailFont, warning ? Warning : Foreground, new RectangleF(area.X + 11, area.Y + 25, area.Width - 22, 17));
+        var left = area.X + 11 * scale;
+        var width = area.Width - 22 * scale;
+        var labelTop = area.Y + 7 * scale;
+        var labelHeight = TextLineHeight(graphics, _labelFont, 2 * scale);
+        var valueTop = labelTop + labelHeight + scale;
+        var valueHeight = TextLineHeight(graphics, _detailFont, 2 * scale);
+        DrawText(graphics, label, _labelFont, Muted, new RectangleF(left, labelTop, width, labelHeight));
+        DrawText(graphics, value, _detailFont, warning ? Warning : Foreground, new RectangleF(left, valueTop, width, valueHeight));
     }
+
+    private static float TextLineHeight(Graphics graphics, Font font, float padding) =>
+        (float)Math.Ceiling(font.GetHeight(graphics)) + padding;
 
     private string FormatTimeout()
     {

@@ -1,3 +1,4 @@
+using NeonMon.Models;
 using NeonMon.Services;
 using NeonMon.UI;
 using System.Text.Json;
@@ -23,7 +24,10 @@ internal static class Program
         if (previewIndex >= 0 && previewIndex + 1 < args.Length)
         {
             Thread.Sleep(250);
-            widget.SavePreview(args[previewIndex + 1], telemetry.Latest);
+            var previewSize = previewIndex + 2 < args.Length && Enum.TryParse<WidgetSize>(args[previewIndex + 2], true, out var requestedSize)
+                ? requestedSize
+                : WidgetSize.Large;
+            widget.SavePreview(args[previewIndex + 1], telemetry.Latest, previewSize);
             return 0;
         }
 

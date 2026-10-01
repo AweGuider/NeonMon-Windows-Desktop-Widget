@@ -1,0 +1,23 @@
+namespace NeonMon.Models;
+
+internal enum WidgetSize
+{
+    Small,
+    Medium,
+    Large
+}
+
+internal enum DockEdge
+{
+    Top,
+    Bottom,
+    Left,
+    Right
+}
+
+internal enum RevealState
+{
+    Hidden,
+    Peek,
+    Open
+}

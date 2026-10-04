@@ -21,3 +21,9 @@ internal enum RevealState
     Peek,
     Open
 }
+
+internal enum QuotaDisplay
+{
+    Remaining,
+    Used
+}

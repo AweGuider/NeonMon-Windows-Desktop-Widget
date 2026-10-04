@@ -1,39 +1,33 @@
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
-using System.Diagnostics;
 using NeonMon.Models;
-using NeonMon.Services;
 
 namespace NeonMon.UI;
 
-internal sealed class WidgetForm : Form
+internal abstract class WidgetForm : Form
 {
-    private static readonly Color BackgroundTop = Color.FromArgb(246, 7, 16, 21);
-    private static readonly Color BackgroundBottom = Color.FromArgb(250, 5, 11, 15);
-    private static readonly Color Cyan = Color.FromArgb(49, 247, 210);
-    private static readonly Color Ice = Color.FromArgb(117, 241, 255);
-    private static readonly Color Foreground = Color.FromArgb(224, 246, 249);
-    private static readonly Color Muted = Color.FromArgb(104, 147, 157);
-    private static readonly Color Track = Color.FromArgb(30, 91, 117, 126);
-    private static readonly Color Warning = Color.FromArgb(255, 173, 84);
+    protected static readonly Color BackgroundTop = Color.FromArgb(246, 7, 16, 21);
+    protected static readonly Color BackgroundBottom = Color.FromArgb(250, 5, 11, 15);
+    protected static readonly Color Cyan = Color.FromArgb(49, 247, 210);
+    protected static readonly Color Ice = Color.FromArgb(117, 241, 255);
+    protected static readonly Color Foreground = Color.FromArgb(224, 246, 249);
+    protected static readonly Color Muted = Color.FromArgb(104, 147, 157);
+    protected static readonly Color Track = Color.FromArgb(30, 91, 117, 126);
+    protected static readonly Color Warning = Color.FromArgb(255, 173, 84);
 
-    private readonly AppSettings _settings;
-    private readonly SettingsStore _settingsStore;
-    private readonly TelemetryService _telemetry;
-    private readonly MetricsBridge _bridge;
-    private readonly NotifyIcon _tray;
-    private readonly ContextMenuStrip _menu;
+    protected readonly Font LabelFont = new("Segoe UI", 7.5f, FontStyle.Regular, GraphicsUnit.Point);
+    protected readonly Font DetailFont = new("Segoe UI", 7.5f, FontStyle.Regular, GraphicsUnit.Point);
+    protected readonly Font ValueFont = new("Consolas", 13.5f, FontStyle.Regular, GraphicsUnit.Point);
+    protected readonly Font UptimeFont = new("Consolas", 17f, FontStyle.Regular, GraphicsUnit.Point);
+    protected readonly Font HeaderFont = new("Segoe UI", 7.5f, FontStyle.Bold, GraphicsUnit.Point);
+    protected readonly Font IconFont = new("Segoe UI Symbol", 10.5f, FontStyle.Bold, GraphicsUnit.Point);
+
+    private readonly Action _saveSettings;
     private readonly System.Windows.Forms.Timer _animationTimer;
     private readonly System.Windows.Forms.Timer _collapseTimer;
     private readonly System.Windows.Forms.Timer _hoverTimer;
     private readonly ToolTip _toolTip;
-    private readonly Font _labelFont = new("Segoe UI", 7.5f, FontStyle.Regular, GraphicsUnit.Point);
-    private readonly Font _detailFont = new("Segoe UI", 7.5f, FontStyle.Regular, GraphicsUnit.Point);
-    private readonly Font _valueFont = new("Consolas", 13.5f, FontStyle.Regular, GraphicsUnit.Point);
-    private readonly Font _uptimeFont = new("Consolas", 17f, FontStyle.Regular, GraphicsUnit.Point);
-    private readonly Font _headerFont = new("Segoe UI", 7.5f, FontStyle.Bold, GraphicsUnit.Point);
-    private readonly Font _iconFont = new("Segoe UI Symbol", 10.5f, FontStyle.Bold, GraphicsUnit.Point);
     private readonly Dictionary<WidgetSize, Rectangle> _sizeHitAreas = [];
-    private readonly Dictionary<string, Rectangle> _driveHitAreas = [];
     private Rectangle _dockHitArea;
     private Rectangle _pinHitArea;
     private Rectangle _hideHitArea;
@@ -41,7 +35,6 @@ internal sealed class WidgetForm : Form
     private string? _hoveredTooltip;
     private bool _tooltipVisible;
     private long _tooltipHoverStarted;
-    private TelemetrySnapshot _snapshot = TelemetrySnapshot.Empty;
     private RevealState _state = RevealState.Hidden;
     private Rectangle _animationStart;
     private Rectangle _animationTarget;
@@ -53,16 +46,10 @@ internal sealed class WidgetForm : Form
     private Screen _dockScreen;
     private bool _exiting;
 
-    public WidgetForm(
-        AppSettings settings,
-        SettingsStore settingsStore,
-        TelemetryService telemetry,
-        MetricsBridge bridge)
+    protected WidgetForm(StripSettings settings, Action saveSettings)
     {
-        _settings = settings;
-        _settingsStore = settingsStore;
-        _telemetry = telemetry;
-        _bridge = bridge;
+        Settings = settings;
+        _saveSettings = saveSettings;
         _dockScreen = Screen.PrimaryScreen ?? Screen.AllScreens[0];
 
         AutoScaleMode = AutoScaleMode.Dpi;
@@ -75,31 +62,13 @@ internal sealed class WidgetForm : Form
         DoubleBuffered = true;
         MinimumSize = new Size(6, 6);
 
-        _menu = BuildMenu();
-        ContextMenuStrip = _menu;
-
-        _tray = new NotifyIcon
-        {
-            Icon = SystemIcons.Information,
-            Text = "NeonMon",
-            Visible = false,
-            ContextMenuStrip = _menu
-        };
-        _tray.MouseClick += (_, args) =>
-        {
-            if (args.Button == MouseButtons.Left)
-            {
-                ToggleOpen();
-            }
-        };
-
         _animationTimer = new System.Windows.Forms.Timer { Interval = 15 };
         _animationTimer.Tick += (_, _) => AdvanceAnimation();
         _collapseTimer = new System.Windows.Forms.Timer { Interval = 850 };
         _collapseTimer.Tick += (_, _) =>
         {
             _collapseTimer.Stop();
-            if (!_settings.KeepOpen && !GetHoverBounds().Contains(Cursor.Position) && !_menu.Visible)
+            if (!Settings.KeepOpen && !GetHoverBounds().Contains(Cursor.Position) && !IsMenuVisible)
             {
                 SetRevealState(RevealState.Hidden);
             }
@@ -115,7 +84,7 @@ internal sealed class WidgetForm : Form
         };
         _toolTip.Popup += (_, args) =>
         {
-            var size = TextRenderer.MeasureText(_hoveredTooltip ?? string.Empty, _detailFont);
+            var size = TextRenderer.MeasureText(_hoveredTooltip ?? string.Empty, DetailFont);
             args.ToolTipSize = new Size(size.Width + 18, size.Height + 10);
         };
         _toolTip.Draw += (_, args) =>
@@ -125,7 +94,7 @@ internal sealed class WidgetForm : Form
             using var border = new Pen(Color.FromArgb(150, Cyan));
             args.Graphics.FillRectangle(background, args.Bounds);
             args.Graphics.DrawRectangle(border, 0, 0, args.Bounds.Width - 1, args.Bounds.Height - 1);
-            TextRenderer.DrawText(args.Graphics, args.ToolTipText, _detailFont, new Point(9, 5), Foreground, TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(args.Graphics, args.ToolTipText, DetailFont, new Point(9, 5), Foreground, TextFormatFlags.NoPadding);
         };
 
         _hoverTimer = new System.Windows.Forms.Timer { Interval = 80 };
@@ -134,7 +103,7 @@ internal sealed class WidgetForm : Form
         MouseEnter += (_, _) =>
         {
             _collapseTimer.Stop();
-            if (_state == RevealState.Hidden)
+            if (_state == RevealState.Hidden && CanRevealNow())
             {
                 SetRevealState(RevealState.Peek);
             }
@@ -147,40 +116,22 @@ internal sealed class WidgetForm : Form
         {
             Bounds = CalculateBounds(RevealState.Hidden);
             ApplyWindowRegion();
-            if (_settings.HtmlBridgeEnabled && !_bridge.Start(_settings.HtmlBridgePort))
-            {
-                _settings.HtmlBridgeEnabled = false;
-            }
         };
-        Shown += (_, _) =>
-        {
-            _tray.Visible = true;
-            _hoverTimer.Start();
-        };
-
-        _telemetry.SnapshotUpdated += HandleSnapshot;
-        _telemetry.SetActive(false);
+        Shown += (_, _) => _hoverTimer.Start();
     }
+
+    internal event Action<WidgetForm, RevealState>? RevealStateChanged;
+    internal event Action<WidgetForm>? LayoutCommitted;
+    internal event Action? ExitRequested;
+    internal event Action<string>? NoticeRequested;
+
+    internal StripSettings Settings { get; }
+    internal RevealState State => _state;
+    internal Screen DockScreen => _dockScreen;
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal Func<WidgetForm, bool>? CanReveal { get; set; }
 
     protected override bool ShowWithoutActivation => true;
-
-    internal void SavePreview(
-        string path,
-        TelemetrySnapshot snapshot,
-        WidgetSize size = WidgetSize.Large,
-        RevealState state = RevealState.Open)
-    {
-        _state = state;
-        _settings.Size = size;
-        _snapshot = snapshot;
-        Size = GetTargetSize(state);
-        _ = Handle;
-        ApplyWindowRegion();
-
-        using var bitmap = new Bitmap(ClientSize.Width, ClientSize.Height);
-        DrawToBitmap(bitmap, ClientRectangle);
-        bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
-    }
 
     protected override CreateParams CreateParams
     {
@@ -194,89 +145,137 @@ internal sealed class WidgetForm : Form
         }
     }
 
-    private ContextMenuStrip BuildMenu()
+    protected bool IsHorizontal => Settings.DockEdge is DockEdge.Top or DockEdge.Bottom;
+
+    private bool IsMenuVisible => ContextMenuStrip?.Visible == true;
+
+    protected abstract string Title { get; }
+
+    protected virtual Size GetLogicalHiddenSize(bool horizontal) => horizontal ? new Size(72, 6) : new Size(6, 72);
+
+    protected virtual Size GetLogicalPeekSize(bool horizontal) => horizontal ? new Size(72, 28) : new Size(28, 72);
+
+    protected virtual Size GetLogicalPeekReserve(bool horizontal) => GetLogicalPeekSize(horizontal);
+
+    protected abstract Size GetLogicalOpenSize(WidgetSize size);
+
+    protected abstract void DrawPeek(Graphics graphics);
+
+    protected abstract void DrawBody(Graphics graphics);
+
+    protected virtual bool HandleBodyClick(Point point) => false;
+
+    protected virtual string? GetBodyTooltip(Point point) => null;
+
+    protected virtual void OnRevealStateChanged(RevealState state)
     {
-        var menu = new ContextMenuStrip { ShowImageMargin = false };
-        menu.Items.Add("Open", null, (_, _) => SetRevealState(RevealState.Open));
-        menu.Items.Add("Hide", null, (_, _) => SetRevealState(RevealState.Hidden));
-
-        var sizeMenu = new ToolStripMenuItem("Layout size");
-        foreach (var size in Enum.GetValues<WidgetSize>())
-        {
-            var item = new ToolStripMenuItem(size.ToString()) { Checked = _settings.Size == size };
-            item.Click += (_, _) => SetWidgetSize(size);
-            sizeMenu.DropDownItems.Add(item);
-        }
-        menu.Items.Add(sizeMenu);
-
-        var dockMenu = new ToolStripMenuItem("Dock edge");
-        foreach (var edge in Enum.GetValues<DockEdge>())
-        {
-            var item = new ToolStripMenuItem(edge.ToString()) { Checked = _settings.DockEdge == edge };
-            item.Click += (_, _) => SetDockEdge(edge);
-            dockMenu.DropDownItems.Add(item);
-        }
-        menu.Items.Add(dockMenu);
-
-        var keepOpen = new ToolStripMenuItem("Keep open") { Checked = _settings.KeepOpen, CheckOnClick = true };
-        keepOpen.CheckedChanged += (_, _) =>
-        {
-            _settings.KeepOpen = keepOpen.Checked;
-            SaveSettings();
-            if (_settings.KeepOpen)
-            {
-                SetRevealState(RevealState.Open);
-            }
-        };
-        menu.Items.Add(keepOpen);
-
-        var htmlBridge = new ToolStripMenuItem($"HTML bridge · 127.0.0.1:{_settings.HtmlBridgePort}")
-        {
-            Checked = _settings.HtmlBridgeEnabled,
-            CheckOnClick = true
-        };
-        htmlBridge.CheckedChanged += (_, _) =>
-        {
-            if (htmlBridge.Checked && !_bridge.Start(_settings.HtmlBridgePort))
-            {
-                htmlBridge.Checked = false;
-                _tray.ShowBalloonTip(2500, "NeonMon", "The HTML bridge port is unavailable.", ToolTipIcon.Warning);
-                return;
-            }
-
-            if (!htmlBridge.Checked)
-            {
-                _bridge.Stop();
-            }
-
-            _settings.HtmlBridgeEnabled = htmlBridge.Checked;
-            SaveSettings();
-            Invalidate();
-        };
-        menu.Items.Add(htmlBridge);
-
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit", null, (_, _) =>
-        {
-            _exiting = true;
-            Close();
-        });
-        menu.Closed += (_, _) => ScheduleCollapse();
-        return menu;
     }
 
-    private void HandleSnapshot(TelemetrySnapshot snapshot)
+    protected void ShowNotice(string text) => NoticeRequested?.Invoke(text);
+
+    internal void SavePreview(string path, WidgetSize size = WidgetSize.Large, RevealState state = RevealState.Open)
     {
-        if (IsDisposed || !IsHandleCreated)
+        _state = state;
+        Settings.Size = size;
+        Size = GetTargetSize(state);
+        _ = Handle;
+        ApplyWindowRegion();
+
+        using var bitmap = new Bitmap(ClientSize.Width, ClientSize.Height);
+        DrawToBitmap(bitmap, ClientRectangle);
+        bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+    }
+
+    internal void PrepareExit() => _exiting = true;
+
+    internal void ToggleOpen() => SetRevealState(_state == RevealState.Open ? RevealState.Hidden : RevealState.Open);
+
+    internal void SetWidgetSize(WidgetSize size)
+    {
+        Settings.Size = size;
+        SaveSettings();
+        SetRevealState(RevealState.Open, true);
+    }
+
+    internal void SetDockEdge(DockEdge edge)
+    {
+        Settings.DockEdge = edge;
+        _dockScreen = Screen.FromPoint(Cursor.Position);
+        LayoutCommitted?.Invoke(this);
+        SaveSettings();
+        SetRevealState(_state, true);
+    }
+
+    internal void SetKeepOpen(bool keepOpen)
+    {
+        Settings.KeepOpen = keepOpen;
+        SaveSettings();
+        if (keepOpen)
+        {
+            SetRevealState(RevealState.Open);
+        }
+
+        Invalidate();
+    }
+
+    internal void SetRevealState(RevealState state, bool forceAnimation = false)
+    {
+        if (_state == state && !forceAnimation)
         {
             return;
         }
 
-        BeginInvoke(new Action(() =>
+        _state = state;
+        OnRevealStateChanged(state);
+        _animationStart = Bounds;
+        _animationTarget = CalculateBounds(state);
+        _animationStarted = Environment.TickCount64;
+        _animationTimer.Start();
+        Invalidate();
+        RevealStateChanged?.Invoke(this, state);
+    }
+
+    internal void AnimateToLayout()
+    {
+        if (CalculateBounds(_state) != Bounds)
         {
-            _snapshot = snapshot;
+            SetRevealState(_state, true);
+        }
+    }
+
+    protected void ContentSizeChanged()
+    {
+        if (!IsHandleCreated || _animationTimer.Enabled)
+        {
             Invalidate();
-        }));
+            return;
+        }
+
+        Bounds = CalculateBounds(_state);
+        ApplyWindowRegion();
+        Invalidate();
+    }
+
+    internal void ScheduleCollapse()
+    {
+        if (!Settings.KeepOpen && !IsMenuVisible)
+        {
+            if (!_collapseTimer.Enabled)
+            {
+                _collapseTimer.Start();
+            }
+        }
+    }
+
+    internal Rectangle GetReservedHoverBounds(double offset)
+    {
+        var horizontal = IsHorizontal;
+        var hidden = CalculateBounds(ToDevice(GetLogicalHiddenSize(horizontal)), offset);
+        var peek = CalculateBounds(ToDevice(GetLogicalPeekReserve(horizontal)), offset);
+        var bounds = Rectangle.Union(hidden, peek);
+        var margin = HoverMargin();
+        bounds.Inflate(margin, margin);
+        return bounds;
     }
 
     private void HandleMouseDown(object? sender, MouseEventArgs args)
@@ -289,7 +288,7 @@ internal sealed class WidgetForm : Form
         _mouseDown = true;
         _dragging = false;
         _mouseDownScreen = Cursor.Position;
-        _dragStartOffset = _settings.DockOffset;
+        _dragStartOffset = Settings.DockOffset;
     }
 
     private void HandleMouseMove(object? sender, MouseEventArgs args)
@@ -311,13 +310,13 @@ internal sealed class WidgetForm : Form
         }
 
         var area = _dockScreen.WorkingArea;
-        if (_settings.DockEdge is DockEdge.Top or DockEdge.Bottom)
+        if (IsHorizontal)
         {
-            _settings.DockOffset = Math.Clamp(_dragStartOffset + (cursor.X - _mouseDownScreen.X) / (double)Math.Max(1, area.Width), 0, 1);
+            Settings.DockOffset = Math.Clamp(_dragStartOffset + (cursor.X - _mouseDownScreen.X) / (double)Math.Max(1, area.Width), 0, 1);
         }
         else
         {
-            _settings.DockOffset = Math.Clamp(_dragStartOffset + (cursor.Y - _mouseDownScreen.Y) / (double)Math.Max(1, area.Height), 0, 1);
+            Settings.DockOffset = Math.Clamp(_dragStartOffset + (cursor.Y - _mouseDownScreen.Y) / (double)Math.Max(1, area.Height), 0, 1);
         }
 
         Bounds = CalculateBounds(_state);
@@ -334,26 +333,23 @@ internal sealed class WidgetForm : Form
         if (_dragging)
         {
             _dragging = false;
+            LayoutCommitted?.Invoke(this);
             SaveSettings();
+            AnimateToLayout();
             return;
         }
 
         if (_state == RevealState.Open)
         {
             var point = args.Location;
-            foreach (var drive in _driveHitAreas)
+            if (HandleBodyClick(point))
             {
-                if (drive.Value.Contains(point))
-                {
-                    OpenDrive(drive.Key);
-                    return;
-                }
+                return;
             }
 
             if (_exitHitArea.Contains(point))
             {
-                _exiting = true;
-                Close();
+                ExitRequested?.Invoke();
                 return;
             }
 
@@ -371,7 +367,7 @@ internal sealed class WidgetForm : Form
 
             if (_pinHitArea.Contains(point))
             {
-                _settings.KeepOpen = !_settings.KeepOpen;
+                Settings.KeepOpen = !Settings.KeepOpen;
                 SaveSettings();
                 Invalidate();
                 return;
@@ -390,28 +386,9 @@ internal sealed class WidgetForm : Form
         ToggleOpen();
     }
 
-    private void ToggleOpen() => SetRevealState(_state == RevealState.Open ? RevealState.Hidden : RevealState.Open);
-
-    private void SetWidgetSize(WidgetSize size)
-    {
-        _settings.Size = size;
-        SaveSettings();
-        UpdateMenuChecks();
-        SetRevealState(RevealState.Open, true);
-    }
-
-    private void SetDockEdge(DockEdge edge)
-    {
-        _settings.DockEdge = edge;
-        _dockScreen = Screen.FromPoint(Cursor.Position);
-        SaveSettings();
-        UpdateMenuChecks();
-        SetRevealState(_state, true);
-    }
-
     private void CycleDockEdge()
     {
-        var next = _settings.DockEdge switch
+        var next = Settings.DockEdge switch
         {
             DockEdge.Top => DockEdge.Right,
             DockEdge.Right => DockEdge.Bottom,
@@ -421,58 +398,7 @@ internal sealed class WidgetForm : Form
         SetDockEdge(next);
     }
 
-    private void OpenDrive(string driveName)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = driveName + Path.DirectorySeparatorChar,
-                UseShellExecute = true
-            });
-        }
-        catch
-        {
-            _tray.ShowBalloonTip(2500, "NeonMon", $"Could not open {driveName}.", ToolTipIcon.Warning);
-        }
-    }
-
-    private void UpdateMenuChecks()
-    {
-        foreach (var root in _menu.Items.OfType<ToolStripMenuItem>())
-        {
-            if (root.Text == "Layout size")
-            {
-                foreach (ToolStripMenuItem item in root.DropDownItems)
-                {
-                    item.Checked = item.Text == _settings.Size.ToString();
-                }
-            }
-            else if (root.Text == "Dock edge")
-            {
-                foreach (ToolStripMenuItem item in root.DropDownItems)
-                {
-                    item.Checked = item.Text == _settings.DockEdge.ToString();
-                }
-            }
-        }
-    }
-
-    private void SetRevealState(RevealState state, bool forceAnimation = false)
-    {
-        if (_state == state && !forceAnimation)
-        {
-            return;
-        }
-
-        _state = state;
-        _telemetry.SetActive(state == RevealState.Open);
-        _animationStart = Bounds;
-        _animationTarget = CalculateBounds(state);
-        _animationStarted = Environment.TickCount64;
-        _animationTimer.Start();
-        Invalidate();
-    }
+    private bool CanRevealNow() => CanReveal?.Invoke(this) ?? true;
 
     private void AdvanceAnimation()
     {
@@ -491,22 +417,23 @@ internal sealed class WidgetForm : Form
         }
     }
 
-    private Rectangle CalculateBounds(RevealState state)
+    private Rectangle CalculateBounds(RevealState state) => CalculateBounds(GetTargetSize(state), Settings.DockOffset);
+
+    private Rectangle CalculateBounds(Size size, double offset)
     {
-        var size = GetTargetSize(state);
         var area = _dockScreen.WorkingArea;
         int x;
         int y;
 
-        if (_settings.DockEdge is DockEdge.Top or DockEdge.Bottom)
+        if (IsHorizontal)
         {
-            x = area.Left + (int)Math.Round((area.Width - size.Width) * _settings.DockOffset);
-            y = _settings.DockEdge == DockEdge.Top ? area.Top + 1 : area.Bottom - size.Height - 1;
+            x = area.Left + (int)Math.Round((area.Width - size.Width) * offset);
+            y = Settings.DockEdge == DockEdge.Top ? area.Top + 1 : area.Bottom - size.Height - 1;
         }
         else
         {
-            x = _settings.DockEdge == DockEdge.Left ? area.Left + 1 : area.Right - size.Width - 1;
-            y = area.Top + (int)Math.Round((area.Height - size.Height) * _settings.DockOffset);
+            x = Settings.DockEdge == DockEdge.Left ? area.Left + 1 : area.Right - size.Width - 1;
+            y = area.Top + (int)Math.Round((area.Height - size.Height) * offset);
         }
 
         return new Rectangle(new Point(x, y), size);
@@ -514,25 +441,19 @@ internal sealed class WidgetForm : Form
 
     private Size GetTargetSize(RevealState state)
     {
+        var horizontal = IsHorizontal;
+        return state switch
+        {
+            RevealState.Hidden => ToDevice(GetLogicalHiddenSize(horizontal)),
+            RevealState.Peek => ToDevice(GetLogicalPeekSize(horizontal)),
+            _ => ToDevice(GetLogicalOpenSize(Settings.Size))
+        };
+    }
+
+    private Size ToDevice(Size size)
+    {
         var scale = DeviceDpi / 96f;
-        Size Logical(Size size) => new((int)Math.Round(size.Width * scale), (int)Math.Round(size.Height * scale));
-
-        if (state == RevealState.Hidden)
-        {
-            return Logical(_settings.DockEdge is DockEdge.Top or DockEdge.Bottom ? new Size(72, 6) : new Size(6, 72));
-        }
-
-        if (state == RevealState.Peek)
-        {
-            return Logical(_settings.DockEdge is DockEdge.Top or DockEdge.Bottom ? new Size(72, 28) : new Size(28, 72));
-        }
-
-        return Logical(_settings.Size switch
-        {
-            WidgetSize.Small => new Size(380, 88),
-            WidgetSize.Medium => new Size(580, 124),
-            _ => new Size(780, 190)
-        });
+        return new((int)Math.Round(size.Width * scale), (int)Math.Round(size.Height * scale));
     }
 
     private static Rectangle Lerp(Rectangle from, Rectangle to, double amount) => new(
@@ -541,20 +462,11 @@ internal sealed class WidgetForm : Form
         (int)Math.Round(from.Width + (to.Width - from.Width) * amount),
         (int)Math.Round(from.Height + (to.Height - from.Height) * amount));
 
-    private void ScheduleCollapse()
-    {
-        if (!_settings.KeepOpen && !_menu.Visible)
-        {
-            if (!_collapseTimer.Enabled)
-            {
-                _collapseTimer.Start();
-            }
-        }
-    }
+    private int HoverMargin() => Math.Max(6, (int)Math.Round(8 * DeviceDpi / 96f));
 
     private Rectangle GetHoverBounds()
     {
-        var margin = Math.Max(6, (int)Math.Round(8 * DeviceDpi / 96f));
+        var margin = HoverMargin();
         var bounds = Bounds;
         bounds.Inflate(margin, margin);
         return bounds;
@@ -570,8 +482,11 @@ internal sealed class WidgetForm : Form
         var inside = GetHoverBounds().Contains(Cursor.Position);
         if (_state == RevealState.Hidden && inside)
         {
-            _collapseTimer.Stop();
-            SetRevealState(RevealState.Peek);
+            if (CanRevealNow())
+            {
+                _collapseTimer.Stop();
+                SetRevealState(RevealState.Peek);
+            }
         }
         else if (_state == RevealState.Peek && !inside)
         {
@@ -598,14 +513,7 @@ internal sealed class WidgetForm : Form
         string? text = null;
         if (point is not null)
         {
-            foreach (var drive in _driveHitAreas)
-            {
-                if (drive.Value.Contains(point.Value))
-                {
-                    text = $"Open {drive.Key} in File Explorer";
-                    break;
-                }
-            }
+            text = GetBodyTooltip(point.Value);
 
             foreach (var hit in _sizeHitAreas)
             {
@@ -618,11 +526,11 @@ internal sealed class WidgetForm : Form
 
             if (text is null && _dockHitArea.Contains(point.Value))
             {
-                text = $"Docked to {_settings.DockEdge.ToString().ToLowerInvariant()} · click to move";
+                text = $"Docked to {Settings.DockEdge.ToString().ToLowerInvariant()} · click to move";
             }
             else if (text is null && _pinHitArea.Contains(point.Value))
             {
-                text = _settings.KeepOpen ? "Unpin and allow auto-hide" : "Pin the widget open";
+                text = Settings.KeepOpen ? "Unpin and allow auto-hide" : "Pin the widget open";
             }
             else if (text is null && _hideHitArea.Contains(point.Value))
             {
@@ -674,7 +582,9 @@ internal sealed class WidgetForm : Form
         }
         else
         {
-            DrawOpen(args.Graphics);
+            DrawBackground(args.Graphics, 13);
+            DrawHeader(args.Graphics);
+            DrawBody(args.Graphics);
         }
     }
 
@@ -682,24 +592,24 @@ internal sealed class WidgetForm : Form
     {
     }
 
-    private void DrawHidden(Graphics graphics)
+    protected virtual void DrawHidden(Graphics graphics)
     {
         using var background = new SolidBrush(Color.FromArgb(225, 6, 15, 20));
         graphics.FillRectangle(background, ClientRectangle);
         using var line = new Pen(Cyan, Math.Max(1f, DeviceDpi / 96f));
-        if (_settings.DockEdge is DockEdge.Top or DockEdge.Bottom)
+        if (IsHorizontal)
         {
-            var y = _settings.DockEdge == DockEdge.Top ? Height - 1 : 0;
+            var y = Settings.DockEdge == DockEdge.Top ? Height - 1 : 0;
             graphics.DrawLine(line, Width * 0.22f, y, Width * 0.78f, y);
         }
         else
         {
-            var x = _settings.DockEdge == DockEdge.Left ? Width - 1 : 0;
+            var x = Settings.DockEdge == DockEdge.Left ? Width - 1 : 0;
             graphics.DrawLine(line, x, Height * 0.22f, x, Height * 0.78f);
         }
     }
 
-    private void DrawPeek(Graphics graphics)
+    protected void DrawPeekOutline(Graphics graphics)
     {
         DrawBackground(graphics, 8);
         var scale = DeviceDpi / 96f;
@@ -714,40 +624,9 @@ internal sealed class WidgetForm : Form
         using var outlineLine = new Pen(Color.FromArgb(230, Cyan), Math.Max(1.2f, 1.15f * scale));
         graphics.DrawPath(outlineGlow, outline);
         graphics.DrawPath(outlineLine, outline);
-
-        using var glow = new Pen(Color.FromArgb(95, Cyan), 4f);
-        using var pulse = new Pen(Cyan, 1.4f);
-        var centerX = Width / 2f;
-        var centerY = Height / 2f;
-        var horizontal = _settings.DockEdge is DockEdge.Top or DockEdge.Bottom;
-        var points = horizontal
-            ? new[] { new PointF(centerX - 16, centerY), new PointF(centerX - 7, centerY), new PointF(centerX - 3, centerY - 6), new PointF(centerX + 2, centerY + 6), new PointF(centerX + 7, centerY), new PointF(centerX + 16, centerY) }
-            : new[] { new PointF(centerX, centerY - 16), new PointF(centerX, centerY - 7), new PointF(centerX - 6, centerY - 3), new PointF(centerX + 6, centerY + 2), new PointF(centerX, centerY + 7), new PointF(centerX, centerY + 16) };
-        graphics.DrawLines(glow, points);
-        graphics.DrawLines(pulse, points);
     }
 
-    private void DrawOpen(Graphics graphics)
-    {
-        DrawBackground(graphics, 13);
-        _driveHitAreas.Clear();
-        DrawHeader(graphics);
-
-        switch (_settings.Size)
-        {
-            case WidgetSize.Small:
-                DrawSmall(graphics);
-                break;
-            case WidgetSize.Medium:
-                DrawMedium(graphics);
-                break;
-            default:
-                DrawLarge(graphics);
-                break;
-        }
-    }
-
-    private void DrawBackground(Graphics graphics, int radius)
+    protected void DrawBackground(Graphics graphics, int radius)
     {
         using var path = RoundedRectangle(new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1)), radius * DeviceDpi / 96f);
         using var background = new LinearGradientBrush(ClientRectangle, BackgroundTop, BackgroundBottom, LinearGradientMode.Vertical);
@@ -764,7 +643,7 @@ internal sealed class WidgetForm : Form
         graphics.DrawLine(linePen, 10 * scale, headerHeight, Width - 10 * scale, headerHeight);
         using var liveBrush = new SolidBrush(Cyan);
         graphics.FillEllipse(liveBrush, 12 * scale, 10 * scale, 6 * scale, 6 * scale);
-        DrawText(graphics, "SYSTEM PULSE", _headerFont, Muted, new RectangleF(24 * scale, 6 * scale, 130 * scale, 16 * scale));
+        DrawText(graphics, Title, HeaderFont, Muted, new RectangleF(24 * scale, 6 * scale, 130 * scale, 16 * scale));
 
         var x = Width - (int)Math.Round(179 * scale);
         _sizeHitAreas.Clear();
@@ -772,25 +651,25 @@ internal sealed class WidgetForm : Form
         {
             var rectangle = new Rectangle(x, (int)Math.Round(5 * scale), (int)Math.Round(22 * scale), (int)Math.Round(18 * scale));
             _sizeHitAreas[size] = rectangle;
-            using var fill = new SolidBrush(size == _settings.Size ? Color.FromArgb(35, Cyan) : Color.Transparent);
+            using var fill = new SolidBrush(size == Settings.Size ? Color.FromArgb(35, Cyan) : Color.Transparent);
             graphics.FillRectangle(fill, rectangle);
-            DrawCenteredText(graphics, size.ToString()[0].ToString(), _labelFont, size == _settings.Size ? Cyan : Muted, rectangle);
+            DrawCenteredText(graphics, size.ToString()[0].ToString(), LabelFont, size == Settings.Size ? Cyan : Muted, rectangle);
             x += (int)Math.Round(24 * scale);
         }
 
         _dockHitArea = new Rectangle(x + (int)(2 * scale), (int)(5 * scale), (int)(22 * scale), (int)(18 * scale));
-        DrawCenteredText(graphics, DockGlyph(), _iconFont, Ice, _dockHitArea);
+        DrawCenteredText(graphics, DockGlyph(), IconFont, Ice, _dockHitArea);
         x += (int)Math.Round(25 * scale);
 
         _pinHitArea = new Rectangle(x + (int)(2 * scale), (int)(5 * scale), (int)(22 * scale), (int)(18 * scale));
-        DrawCenteredText(graphics, _settings.KeepOpen ? "◆" : "◇", _detailFont, _settings.KeepOpen ? Cyan : Muted, _pinHitArea);
+        DrawCenteredText(graphics, Settings.KeepOpen ? "◆" : "◇", DetailFont, Settings.KeepOpen ? Cyan : Muted, _pinHitArea);
         _hideHitArea = new Rectangle(x + (int)(27 * scale), (int)(5 * scale), (int)(22 * scale), (int)(18 * scale));
-        DrawCenteredText(graphics, "—", _detailFont, Muted, _hideHitArea);
+        DrawCenteredText(graphics, "—", DetailFont, Muted, _hideHitArea);
         _exitHitArea = new Rectangle(x + (int)(52 * scale), (int)(5 * scale), (int)(22 * scale), (int)(18 * scale));
-        DrawCenteredText(graphics, "×", _iconFont, Warning, _exitHitArea);
+        DrawCenteredText(graphics, "×", IconFont, Warning, _exitHitArea);
     }
 
-    private string DockGlyph() => _settings.DockEdge switch
+    private string DockGlyph() => Settings.DockEdge switch
     {
         DockEdge.Top => "↑",
         DockEdge.Right => "→",
@@ -798,156 +677,10 @@ internal sealed class WidgetForm : Form
         _ => "←"
     };
 
-    private void DrawSmall(Graphics graphics)
-    {
-        var scale = DeviceDpi / 96f;
-        var top = 34 * scale;
-        DrawUptime(graphics, new RectangleF(14 * scale, top, 126 * scale, 38 * scale), compact: true);
-        DrawMetric(graphics, new RectangleF(148 * scale, top, 58 * scale, 38 * scale), "CPU", Percent(_snapshot.CpuPercent), null, _snapshot.CpuPercent);
-        DrawMetric(graphics, new RectangleF(214 * scale, top, 58 * scale, 38 * scale), "GPU", Percent(_snapshot.GpuPercent), null, _snapshot.GpuPercent);
-        DrawDriveMetric(graphics, new RectangleF(280 * scale, top, 86 * scale, 38 * scale), _snapshot.Drives.FirstOrDefault(), compact: true);
-    }
-
-    private void DrawMedium(Graphics graphics)
-    {
-        var scale = DeviceDpi / 96f;
-        var top = 40 * scale;
-        DrawUptime(graphics, new RectangleF(16 * scale, top, 150 * scale, 55 * scale), compact: false);
-        DrawMetric(graphics, new RectangleF(180 * scale, top, 78 * scale, 55 * scale), "CPU", Percent(_snapshot.CpuPercent), Temperature(_snapshot.CpuTemperatureC), _snapshot.CpuPercent);
-        DrawMetric(graphics, new RectangleF(270 * scale, top, 78 * scale, 55 * scale), "GPU", Percent(_snapshot.GpuPercent), Temperature(_snapshot.GpuTemperatureC), _snapshot.GpuPercent);
-        DrawMetric(graphics, new RectangleF(360 * scale, top, 88 * scale, 55 * scale), "MEMORY", Percent(_snapshot.MemoryPercent), $"{_snapshot.MemoryUsedGb:0.0} GB", _snapshot.MemoryPercent);
-        DrawDriveMetric(graphics, new RectangleF(462 * scale, top, 102 * scale, 55 * scale), _snapshot.Drives.FirstOrDefault(), compact: false);
-    }
-
-    private void DrawLarge(Graphics graphics)
-    {
-        var scale = DeviceDpi / 96f;
-        var top = 42 * scale;
-        var metricHeight = 62 * scale;
-        DrawUptime(graphics, new RectangleF(16 * scale, top, 155 * scale, metricHeight), compact: false);
-        DrawMetric(graphics, new RectangleF(184 * scale, top, 86 * scale, metricHeight), "CPU", Percent(_snapshot.CpuPercent), Temperature(_snapshot.CpuTemperatureC), _snapshot.CpuPercent);
-        DrawMetric(graphics, new RectangleF(282 * scale, top, 86 * scale, metricHeight), "GPU", Percent(_snapshot.GpuPercent), Temperature(_snapshot.GpuTemperatureC), _snapshot.GpuPercent);
-        DrawMetric(graphics, new RectangleF(380 * scale, top, 100 * scale, metricHeight), "MEMORY", Percent(_snapshot.MemoryPercent), $"{_snapshot.MemoryUsedGb:0.0}/{_snapshot.MemoryTotalGb:0} GB", _snapshot.MemoryPercent);
-        DrawDriveMetric(graphics, new RectangleF(494 * scale, top, 110 * scale, metricHeight), _snapshot.Drives.FirstOrDefault(), compact: false);
-
-        var secondDrive = _snapshot.Drives.Skip(1).FirstOrDefault();
-        if (secondDrive is not null)
-        {
-            DrawDriveMetric(graphics, new RectangleF(618 * scale, top, 110 * scale, metricHeight), secondDrive, compact: false);
-        }
-        else
-        {
-            var clock = _snapshot.GpuClockMhz is null ? "—" : $"{_snapshot.GpuClockMhz:N0}";
-            var memoryClock = _snapshot.GpuMemoryClockMhz is null ? null : $"VRAM {_snapshot.GpuMemoryClockMhz:N0} MHz";
-            DrawMetric(graphics, new RectangleF(618 * scale, top, 110 * scale, metricHeight), "GPU CLOCK", clock, memoryClock, null);
-        }
-
-        DrawInfoCard(graphics, new RectangleF(16 * scale, 121 * scale, 354 * scale, 52 * scale), "TOP CPU PROCESS", $"{_snapshot.TopProcess} · {_snapshot.TopProcessCpuPercent:0.0}%", false);
-        DrawInfoCard(graphics, new RectangleF(386 * scale, 121 * scale, 378 * scale, 52 * scale), "GPU STABILITY", FormatTimeout(), _snapshot.LastGpuTimeout is not null);
-    }
-
-    private void DrawUptime(Graphics graphics, RectangleF area, bool compact)
-    {
-        var scale = DeviceDpi / 96f;
-        var labelHeight = TextLineHeight(graphics, _labelFont, 2 * scale);
-        var valueFont = compact ? _valueFont : _uptimeFont;
-        var valueHeight = TextLineHeight(graphics, valueFont, 2 * scale);
-
-        DrawText(graphics, "UPTIME", _labelFont, Muted, new RectangleF(area.X, area.Y, area.Width, labelHeight));
-        var value = compact
-            ? $"{(int)_snapshot.Uptime.TotalDays:00}:{_snapshot.Uptime.Hours:00}:{_snapshot.Uptime.Minutes:00}"
-            : $"{(int)_snapshot.Uptime.TotalDays:00}:{_snapshot.Uptime.Hours:00}:{_snapshot.Uptime.Minutes:00}:{_snapshot.Uptime.Seconds:00}";
-        var valueTop = area.Y + labelHeight;
-        DrawText(graphics, value, valueFont, Ice, new RectangleF(area.X, valueTop, area.Width, valueHeight));
-        if (!compact)
-        {
-            var detailHeight = TextLineHeight(graphics, _detailFont, 2 * scale);
-            DrawText(graphics, "days · hrs · min · sec", _detailFont, Muted, new RectangleF(area.X, valueTop + valueHeight, area.Width, detailHeight));
-        }
-    }
-
-    private void DrawMetric(Graphics graphics, RectangleF area, string label, string value, string? detail, double? percent, bool warning = false)
-    {
-        var scale = DeviceDpi / 96f;
-        var accent = warning ? Warning : Cyan;
-        var labelHeight = TextLineHeight(graphics, _labelFont, 2 * scale);
-        var valueHeight = TextLineHeight(graphics, _valueFont, 2 * scale);
-        DrawText(graphics, label, _labelFont, Muted, new RectangleF(area.X, area.Y, area.Width, labelHeight));
-        DrawText(graphics, value, _valueFont, warning ? Warning : Foreground, new RectangleF(area.X, area.Y + labelHeight, area.Width, valueHeight));
-
-        var track = new RectangleF(area.X, area.Y + labelHeight + valueHeight + 2 * scale, area.Width, 3 * scale);
-        using var trackBrush = new SolidBrush(Track);
-        graphics.FillRectangle(trackBrush, track);
-        if (percent is not null)
-        {
-            using var fill = new SolidBrush(accent);
-            graphics.FillRectangle(fill, track.X, track.Y, Math.Max(2, track.Width * (float)Math.Clamp(percent.Value / 100d, 0, 1)), track.Height);
-        }
-
-        if (!string.IsNullOrWhiteSpace(detail))
-        {
-            var detailTop = track.Bottom + 5 * scale;
-            var detailHeight = TextLineHeight(graphics, _detailFont, 2 * scale);
-            DrawText(graphics, detail, _detailFont, warning ? Warning : Muted, new RectangleF(area.X, detailTop, area.Width, detailHeight));
-        }
-    }
-
-    private void DrawDriveMetric(Graphics graphics, RectangleF area, DriveMetric? drive, bool compact)
-    {
-        if (drive is null)
-        {
-            DrawMetric(graphics, area, "DISK FREE", "—", null, null);
-            return;
-        }
-
-        _driveHitAreas[drive.Name] = Rectangle.Ceiling(area);
-
-        DrawMetric(
-            graphics,
-            area,
-            $"{drive.Name} FREE",
-            $"{drive.FreeGb:0} GB",
-            compact ? null : $"{drive.FreePercent:0.#}% available",
-            drive.FreePercent,
-            drive.FreePercent < 10);
-    }
-
-    private void DrawInfoCard(Graphics graphics, RectangleF area, string label, string value, bool warning)
-    {
-        var scale = DeviceDpi / 96f;
-        using var path = RoundedRectangle(area, 7 * scale);
-        using var fill = new SolidBrush(Color.FromArgb(92, 10, 27, 34));
-        using var border = new Pen(Color.FromArgb(35, 75, 226, 246));
-        graphics.FillPath(fill, path);
-        graphics.DrawPath(border, path);
-        var left = area.X + 11 * scale;
-        var width = area.Width - 22 * scale;
-        var labelTop = area.Y + 7 * scale;
-        var labelHeight = TextLineHeight(graphics, _labelFont, 2 * scale);
-        var valueTop = labelTop + labelHeight + scale;
-        var valueHeight = TextLineHeight(graphics, _detailFont, 2 * scale);
-        DrawText(graphics, label, _labelFont, Muted, new RectangleF(left, labelTop, width, labelHeight));
-        DrawText(graphics, value, _detailFont, warning ? Warning : Foreground, new RectangleF(left, valueTop, width, valueHeight));
-    }
-
-    private static float TextLineHeight(Graphics graphics, Font font, float padding) =>
+    protected static float TextLineHeight(Graphics graphics, Font font, float padding) =>
         (float)Math.Ceiling(font.GetHeight(graphics)) + padding;
 
-    private string FormatTimeout()
-    {
-        if (_snapshot.LastGpuTimeout is null)
-        {
-            return "None found";
-        }
-
-        var age = DateTimeOffset.Now - _snapshot.LastGpuTimeout.Value;
-        var text = age.TotalHours < 48 ? $"{Math.Max(0, age.TotalHours):0}h ago" : $"{Math.Max(0, age.TotalDays):0}d ago";
-        return _snapshot.GpuTimeoutCode is null ? text : $"{text} · 0x{_snapshot.GpuTimeoutCode}";
-    }
-
-    private static string Percent(double value) => $"{value:0}%";
-    private static string Temperature(double? value) => value is null ? "temp unavailable" : $"{value:0}°C";
-    private static void DrawText(Graphics graphics, string value, Font font, Color color, RectangleF bounds)
+    protected static void DrawText(Graphics graphics, string value, Font font, Color color, RectangleF bounds)
     {
         using var brush = new SolidBrush(color);
         using var format = new StringFormat(StringFormat.GenericTypographic)
@@ -958,7 +691,7 @@ internal sealed class WidgetForm : Form
         graphics.DrawString(value, font, brush, bounds, format);
     }
 
-    private static void DrawCenteredText(Graphics graphics, string value, Font font, Color color, Rectangle bounds)
+    protected static void DrawCenteredText(Graphics graphics, string value, Font font, Color color, Rectangle bounds)
     {
         using var brush = new SolidBrush(color);
         using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
@@ -978,7 +711,7 @@ internal sealed class WidgetForm : Form
         Region = new Region(path);
     }
 
-    private static GraphicsPath RoundedRectangle(RectangleF rectangle, float radius)
+    protected static GraphicsPath RoundedRectangle(RectangleF rectangle, float radius)
     {
         var diameter = Math.Min(radius * 2, Math.Min(rectangle.Width, rectangle.Height));
         var path = new GraphicsPath();
@@ -1004,7 +737,7 @@ internal sealed class WidgetForm : Form
     {
         try
         {
-            _settingsStore.Save(_settings);
+            _saveSettings();
         }
         catch
         {
@@ -1027,20 +760,16 @@ internal sealed class WidgetForm : Form
     {
         if (disposing)
         {
-            _telemetry.SnapshotUpdated -= HandleSnapshot;
-            _tray.Visible = false;
-            _tray.Dispose();
-            _menu.Dispose();
             _animationTimer.Dispose();
             _collapseTimer.Dispose();
             _hoverTimer.Dispose();
             _toolTip.Dispose();
-            _labelFont.Dispose();
-            _detailFont.Dispose();
-            _valueFont.Dispose();
-            _uptimeFont.Dispose();
-            _headerFont.Dispose();
-            _iconFont.Dispose();
+            LabelFont.Dispose();
+            DetailFont.Dispose();
+            ValueFont.Dispose();
+            UptimeFont.Dispose();
+            HeaderFont.Dispose();
+            IconFont.Dispose();
         }
 
         base.Dispose(disposing);

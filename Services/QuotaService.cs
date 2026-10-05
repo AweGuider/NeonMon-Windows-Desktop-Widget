@@ -164,7 +164,8 @@ internal sealed class QuotaService : IDisposable
             claude ?? new ProviderQuota { Provider = QuotaProvider.Claude },
             MergeCodex(_codexSession.Read(), _appServerQuota))
         {
-            ClaudeEndpointRequests = _claudeEndpoint.RequestCount
+            ClaudeEndpointRequests = _claudeEndpoint.RequestCount,
+            ClaudeEndpointStatus = _claudeEndpointEnabled() ? _claudeEndpoint.Status : null
         };
     }
 

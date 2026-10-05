@@ -29,7 +29,15 @@ internal sealed class ClaudeStatuslineReader
             using var document = JsonDocument.Parse(File.ReadAllText(FilePath));
             var root = document.RootElement;
             _lastWrite = info.LastWriteTimeUtc;
-            if (!root.TryGetProperty("rate_limits", out var limits) || limits.ValueKind != JsonValueKind.Object)
+            // Early probe builds stored the whole statusline payload under "payload".
+            if (!root.TryGetProperty("rate_limits", out var limits)
+                && !(root.TryGetProperty("payload", out var payload) && payload.ValueKind == JsonValueKind.Object
+                    && payload.TryGetProperty("rate_limits", out limits)))
+            {
+                return _latest;
+            }
+
+            if (limits.ValueKind != JsonValueKind.Object)
             {
                 return _latest;
             }

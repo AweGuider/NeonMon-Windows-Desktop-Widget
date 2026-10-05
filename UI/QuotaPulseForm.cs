@@ -363,7 +363,8 @@ internal sealed class QuotaPulseForm : WidgetForm
                 DrawCreditChip(graphics, quota, now, $"↻{quota.ResetCreditCount}", chipRight, top + 2.5f * scale);
             }
 
-            var age = AgeText(quota, now);
+            var note = EndpointNote(quota, now);
+            var age = note is null ? AgeText(quota, now) : note[^1];
             DrawText(graphics, age, DetailFont, AgeColor(quota, now), new RectangleF(14 * scale, top + 23 * scale, 92 * scale, TextLineHeight(graphics, DetailFont, 2 * scale)));
         }
 
@@ -415,6 +416,15 @@ internal sealed class QuotaPulseForm : WidgetForm
             DrawCreditChip(graphics, quota, now, $"↻ {quota.ResetCreditCount} {noun}{expiry}", left, lineTop - 1 * scale);
             lineTop += 19 * scale;
             DrawText(graphics, $"{quota.Source} · {AgeText(quota, now)}", DetailFont, AgeColor(quota, now), new RectangleF(left, lineTop, 132 * scale, detailHeight));
+        }
+        else if (EndpointNote(quota, now) is { } note)
+        {
+            DrawText(graphics, quota.CapturedAt is null ? quota.Source : $"{quota.Source} · {AgeText(quota, now)}", DetailFont, Muted,
+                new RectangleF(left, lineTop, 132 * scale, detailHeight));
+            for (var i = 0; i < Math.Min(2, note.Length); i++)
+            {
+                DrawText(graphics, note[i], DetailFont, Warning, new RectangleF(left, lineTop + (i + 1) * 14 * scale, 132 * scale, detailHeight));
+            }
         }
         else
         {
@@ -596,6 +606,12 @@ internal sealed class QuotaPulseForm : WidgetForm
     }
 
     private static Color AgeColor(ProviderQuota quota, DateTimeOffset now) => quota.IsStale(now) ? Warning : Muted;
+
+    // Why the Claude endpoint fallback could not refresh stale data, split into "reason" and "action" lines.
+    private string[]? EndpointNote(ProviderQuota quota, DateTimeOffset now) =>
+        quota.Provider == QuotaProvider.Claude && quota.IsStale(now) && _snapshot.ClaudeEndpointStatus is { } status
+            ? status.Split(" · ")
+            : null;
 
     private void DrawCreditChip(Graphics graphics, ProviderQuota quota, DateTimeOffset now, string text, float x, float y)
     {

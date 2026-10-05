@@ -210,7 +210,8 @@ internal sealed partial class MetricsBridge : IDisposable
             capturedAt = now,
             claude = Provider(snapshot.Claude),
             codex = Provider(snapshot.Codex),
-            claudeEndpointRequests = snapshot.ClaudeEndpointRequests
+            claudeEndpointRequests = snapshot.ClaudeEndpointRequests,
+            claudeEndpointStatus = snapshot.ClaudeEndpointStatus
         };
     }
 

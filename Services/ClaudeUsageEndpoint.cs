@@ -28,8 +28,14 @@ internal sealed class ClaudeUsageEndpoint : IDisposable
     public async Task<ProviderQuota?> ReadAsync(CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.Now;
-        if (!CanRequest(now) || ReadCredentials(now) is not { } credentials)
+        if (!CanRequest(now))
         {
+            return null;
+        }
+
+        if (ReadCredentials(now, out var problem) is not { } credentials)
+        {
+            Status = problem;
             return null;
         }
 
@@ -51,21 +57,28 @@ internal sealed class ClaudeUsageEndpoint : IDisposable
                     ? TimeSpan.FromTicks(Math.Min(MaximumBackoff.Ticks, _backoff.Ticks * 2))
                     : MaximumBackoff;
                 _nextAllowed = now + (retryAfter is { } delay && delay > _backoff ? delay : _backoff);
+                Status = $"usage endpoint returned {(int)response.StatusCode} · retry {_nextAllowed.ToLocalTime():HH:mm}";
                 return null;
             }
 
             _backoff = MinimumInterval;
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-            return Parse(document.RootElement, credentials.Plan, DateTimeOffset.Now);
+            var quota = Parse(document.RootElement, credentials.Plan, DateTimeOffset.Now);
+            Status = quota is null ? "usage endpoint format changed" : null;
+            return quota;
         }
         catch
         {
             _backoff = TimeSpan.FromTicks(Math.Min(MaximumBackoff.Ticks, _backoff.Ticks * 2));
             _nextAllowed = now + _backoff;
+            Status = "usage endpoint unreachable";
             return null;
         }
     }
+
+    // Why the last attempt produced no data, or null after a successful read.
+    public string? Status { get; private set; }
 
     internal static ProviderQuota? Parse(JsonElement root, string? plan, DateTimeOffset capturedAt)
     {
@@ -98,8 +111,9 @@ internal sealed class ClaudeUsageEndpoint : IDisposable
         return new QuotaWindow(utilization, QuotaJson.ReadEpoch(window, "resets_at"), windowMinutes);
     }
 
-    private static Credentials? ReadCredentials(DateTimeOffset now)
+    private static Credentials? ReadCredentials(DateTimeOffset now, out string? problem)
     {
+        problem = "Claude CLI is not signed in";
         try
         {
             if (!File.Exists(CredentialsPath))
@@ -110,16 +124,25 @@ internal sealed class ClaudeUsageEndpoint : IDisposable
             using var document = JsonDocument.Parse(File.ReadAllText(CredentialsPath));
             if (!document.RootElement.TryGetProperty("claudeAiOauth", out var oauth)
                 || QuotaJson.ReadString(oauth, "accessToken") is not { Length: > 0 } accessToken
-                || QuotaJson.ReadNumber(oauth, "expiresAt") is not { } expiresAt
-                || DateTimeOffset.FromUnixTimeMilliseconds((long)expiresAt) <= now.AddMinutes(1))
+                || QuotaJson.ReadNumber(oauth, "expiresAt") is not { } expiresAtMilliseconds)
             {
                 return null;
             }
 
+            var expiresAt = DateTimeOffset.FromUnixTimeMilliseconds((long)expiresAtMilliseconds);
+            if (expiresAt <= now.AddMinutes(1))
+            {
+                var local = expiresAt.ToLocalTime();
+                problem = $"CLI sign-in expired {local.ToString(local.Date == now.ToLocalTime().Date ? "HH:mm" : "MMM d")} · open the claude CLI";
+                return null;
+            }
+
+            problem = null;
             return new Credentials(accessToken, QuotaJson.PlanName(QuotaJson.ReadString(oauth, "subscriptionType")));
         }
         catch
         {
+            problem = "could not read the Claude CLI sign-in";
             return null;
         }
     }

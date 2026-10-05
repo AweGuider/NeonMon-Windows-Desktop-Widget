@@ -11,6 +11,22 @@ NeonMon is a lightweight Windows system-monitoring widget. It stays as a thin sc
 - Pin, minimize, custom control tooltips, translucent styling, and short transition animations.
 - Optional read-only HTML integration at `http://127.0.0.1:27171/api/v1/metrics`.
 - Low-overhead sampling: every second while open and every five seconds while collapsed.
+- Quota pulse: a second strip showing Claude Code and Codex 5-hour and weekly limits, reset times, pacing, and Codex reset credits.
+
+## Quota pulse
+
+Quota pulse never calls a model and never uses API keys. Its sources are local:
+
+- **Claude Code:** the plan limits Claude Code passes to its status line. Point the `statusLine` setting in `~/.claude/settings.json` at the bundled script:
+
+  ```json
+  "statusLine": { "type": "command", "command": "node \"C:/Projects/Programming/NeonMon/tools/neonmon-statusline.js\"" }
+  ```
+
+  The script writes `%LOCALAPPDATA%\NeonMon\claude-statusline.json` whenever a CLI session renders its status line. The Claude desktop app does not run status lines, so Claude values refresh only when you use the `claude` CLI; older values are marked stale.
+- **Codex:** the newest session log under `~/.codex/sessions`, plus a read-only `codex app-server` call (`account/rateLimits/read`) every 30 minutes for fresh limits and reset credits. The read does not consume quota.
+
+Values show remaining quota by default; switch to used quota from the tray menu (**Show quota as**). Run `NeonMon.exe --dump-quota quota.json` to write the current quota data to a file.
 
 ## Build and run
 
@@ -39,6 +55,8 @@ Enable **HTML bridge** from the tray menu, then fetch the local JSON endpoint:
 const metrics = await fetch('http://127.0.0.1:27171/api/v1/metrics')
   .then(response => response.json());
 ```
+
+Quota data is available at `http://127.0.0.1:27171/api/v1/quota`.
 
 The bridge is disabled by default, binds only to `127.0.0.1`, and accepts no commands.
 

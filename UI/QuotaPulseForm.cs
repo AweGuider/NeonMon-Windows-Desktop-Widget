@@ -44,19 +44,45 @@ internal sealed class QuotaPulseForm : WidgetForm
 
     private bool ShowRemaining => _quotaSettings.Display == QuotaDisplay.Remaining;
 
+    internal void PostSnapshot(QuotaSnapshot snapshot)
+    {
+        if (IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        BeginInvoke(new Action(() => SetSnapshot(snapshot)));
+    }
+
     internal void SetSnapshot(QuotaSnapshot snapshot)
     {
+        var now = Clock();
         var previousPeek = GetLogicalPeekSize(IsHorizontal);
+        var previousHidden = HiddenKey(now);
         _snapshot = snapshot;
         UpdatePulseTimer();
         if (State == RevealState.Peek && GetLogicalPeekSize(IsHorizontal) != previousPeek)
         {
             ContentSizeChanged();
         }
-        else
+        else if (State != RevealState.Hidden || HiddenKey(now) != previousHidden)
         {
             Invalidate();
         }
+    }
+
+    private (int Claude, int Codex) HiddenKey(DateTimeOffset now) => (SegmentKey(_snapshot.Claude, now), SegmentKey(_snapshot.Codex, now));
+
+    private int SegmentKey(ProviderQuota quota, DateTimeOffset now)
+    {
+        var window = quota.WorstWindow(now);
+        if (window is null)
+        {
+            return -1;
+        }
+
+        var flags = (quota.IsStale(now) ? 1 : 0) | (quota.UseItOrLoseIt(now) ? 2 : 0);
+        return (int)Math.Round(DisplayValue(window, now)) * 4 + flags;
     }
 
     internal void RefreshDisplay()
@@ -558,7 +584,7 @@ internal sealed class QuotaPulseForm : WidgetForm
     {
         if (quota.CapturedAt is not { } captured)
         {
-            return quota.Provider == QuotaProvider.Claude ? "no data · open the claude CLI" : "no data · open Codex";
+            return quota.Provider == QuotaProvider.Claude ? "open the claude CLI to sync" : "open Codex to sync";
         }
 
         var age = now - captured;

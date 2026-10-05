@@ -14,12 +14,14 @@ internal sealed class MetricsBridge : IDisposable
     };
 
     private readonly Func<TelemetrySnapshot> _snapshot;
+    private readonly Func<QuotaSnapshot> _quota;
     private CancellationTokenSource? _cancellation;
     private TcpListener? _listener;
 
-    public MetricsBridge(Func<TelemetrySnapshot> snapshot)
+    public MetricsBridge(Func<TelemetrySnapshot> snapshot, Func<QuotaSnapshot> quota)
     {
         _snapshot = snapshot;
+        _quota = quota;
     }
 
     public bool IsRunning => _listener is not null;
@@ -92,19 +94,24 @@ internal sealed class MetricsBridge : IDisposable
             {
                 body = JsonSerializer.Serialize(_snapshot(), JsonOptions);
             }
+            else if (path.StartsWith("/api/v1/quota", StringComparison.OrdinalIgnoreCase))
+            {
+                body = JsonSerializer.Serialize(CreateQuotaModel(_quota(), DateTimeOffset.Now), JsonOptions);
+            }
             else if (path.StartsWith("/api/v1/schema", StringComparison.OrdinalIgnoreCase))
             {
                 body = JsonSerializer.Serialize(new
                 {
                     version = 1,
                     endpoint = "/api/v1/metrics",
+                    quotaEndpoint = "/api/v1/quota",
                     refreshRecommendedMs = 1000
                 }, JsonOptions);
             }
             else
             {
                 status = "404 Not Found";
-                body = "{\"error\":\"Use /api/v1/metrics or /api/v1/schema\"}";
+                body = "{\"error\":\"Use /api/v1/metrics, /api/v1/quota or /api/v1/schema\"}";
             }
 
             var payload = Encoding.UTF8.GetBytes(body);
@@ -116,6 +123,35 @@ internal sealed class MetricsBridge : IDisposable
             await stream.WriteAsync(headers, cancellationToken).ConfigureAwait(false);
             await stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    public static string SerializeQuota(QuotaSnapshot snapshot) =>
+        JsonSerializer.Serialize(CreateQuotaModel(snapshot, DateTimeOffset.Now), JsonOptions);
+
+    private static object CreateQuotaModel(QuotaSnapshot snapshot, DateTimeOffset now)
+    {
+        object? Window(QuotaWindow? window) => window is null ? null : new
+        {
+            usedPercent = window.Used(now),
+            remainingPercent = window.Remaining(now),
+            resetsAt = window.ResetsAt,
+            windowMinutes = window.WindowMinutes
+        };
+
+        object Provider(ProviderQuota quota) => new
+        {
+            plan = quota.Plan,
+            source = quota.Source,
+            capturedAt = quota.CapturedAt,
+            stale = quota.IsStale(now),
+            fiveHour = Window(quota.FiveHour),
+            weekly = Window(quota.Weekly),
+            weeklyRunsOutFirst = quota.WeeklyRunsOutFirst(now),
+            useItOrLoseIt = quota.UseItOrLoseIt(now),
+            resetCredits = new { count = quota.ResetCreditCount, earliestExpiry = quota.EarliestCreditExpiry }
+        };
+
+        return new { capturedAt = now, claude = Provider(snapshot.Claude), codex = Provider(snapshot.Codex) };
     }
 
     public void Dispose() => Stop();

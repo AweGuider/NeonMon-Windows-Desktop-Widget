@@ -8,6 +8,7 @@ internal sealed class NeonMonContext : ApplicationContext
     private readonly AppSettings _settings;
     private readonly QuotaSettings _quotaSettings;
     private readonly SettingsStore _settingsStore;
+    private readonly QuotaService _quota;
     private readonly MetricsBridge _bridge;
     private readonly NotifyIcon _tray;
     private readonly ContextMenuStrip _systemMenu;
@@ -15,10 +16,11 @@ internal sealed class NeonMonContext : ApplicationContext
     private readonly bool _quotaSettingsCreated;
     private bool _exiting;
 
-    public NeonMonContext(AppSettings settings, SettingsStore settingsStore, TelemetryService telemetry, MetricsBridge bridge)
+    public NeonMonContext(AppSettings settings, SettingsStore settingsStore, TelemetryService telemetry, QuotaService quota, MetricsBridge bridge)
     {
         _settings = settings;
         _settingsStore = settingsStore;
+        _quota = quota;
         _bridge = bridge;
         _quotaSettingsCreated = settings.Quota is null;
         _quotaSettings = settings.Quota ??= CreateDefaultQuotaSettings(settings);
@@ -33,6 +35,8 @@ internal sealed class NeonMonContext : ApplicationContext
             form.ExitRequested += Exit;
             form.NoticeRequested += ShowNotice;
         }
+
+        _quota.SnapshotUpdated += QuotaForm.PostSnapshot;
 
         _systemMenu = CreateMenu(SystemForm);
         _quotaMenu = CreateMenu(QuotaForm);
@@ -62,6 +66,8 @@ internal sealed class NeonMonContext : ApplicationContext
 
     public void Start()
     {
+        QuotaForm.SetSnapshot(_quota.RefreshLocal());
+        _quota.Start();
         SystemForm.Show();
         if (_quotaSettings.Enabled)
         {
@@ -211,6 +217,11 @@ internal sealed class NeonMonContext : ApplicationContext
 
     private void OnRevealStateChanged(WidgetForm form, RevealState state)
     {
+        if (ReferenceEquals(form, QuotaForm))
+        {
+            _quota.SetActive(state == RevealState.Open);
+        }
+
         if (state == RevealState.Hidden)
         {
             return;
@@ -319,6 +330,7 @@ internal sealed class NeonMonContext : ApplicationContext
     {
         if (disposing)
         {
+            _quota.SnapshotUpdated -= QuotaForm.PostSnapshot;
             _tray.Visible = false;
             _tray.Dispose();
             SystemForm.Dispose();

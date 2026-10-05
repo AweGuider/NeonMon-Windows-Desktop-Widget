@@ -152,6 +152,18 @@ internal sealed class NeonMonContext : ApplicationContext
         quotaStrip.Click += (_, _) => SetQuotaEnabled(!_quotaSettings.Enabled);
         menu.Items.Add(quotaStrip);
 
+        var endpoint = new ToolStripMenuItem("Claude: live endpoint fallback")
+        {
+            Checked = _quotaSettings.ClaudeEndpointFallback,
+            ToolTipText = "When the CLI statusline data is stale, read plan usage from Anthropic's usage endpoint "
+                + "with the Claude CLI sign-in. Never refreshes tokens or calls a model."
+        };
+        endpoint.Click += (_, _) => SetClaudeEndpointFallback(!_quotaSettings.ClaudeEndpointFallback);
+        menu.Items.Add(endpoint);
+        menu.Items.Add(new ToolStripMenuItem(_quotaSettings.ClaudeEndpointFallback
+            ? "    on · used when statusline data is stale"
+            : "    off · statusline only (free, local)") { Enabled = false });
+
         var displayMenu = new ToolStripMenuItem("Show quota as");
         foreach (var display in Enum.GetValues<QuotaDisplay>())
         {
@@ -198,6 +210,13 @@ internal sealed class NeonMonContext : ApplicationContext
             QuotaForm.SetRevealState(RevealState.Hidden);
             QuotaForm.Hide();
         }
+    }
+
+    private void SetClaudeEndpointFallback(bool enabled)
+    {
+        _quotaSettings.ClaudeEndpointFallback = enabled;
+        SaveSettings();
+        _quota.RequestRefresh();
     }
 
     private void SetQuotaDisplay(QuotaDisplay display)

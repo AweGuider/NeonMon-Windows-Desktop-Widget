@@ -104,5 +104,7 @@ internal sealed record QuotaSnapshot(ProviderQuota Claude, ProviderQuota Codex)
             CapturedAt = now.AddMinutes(-1)
         });
 
+    public int ClaudeEndpointRequests { get; init; }
+
     public ProviderQuota this[QuotaProvider provider] => provider == QuotaProvider.Claude ? Claude : Codex;
 }

@@ -151,7 +151,13 @@ internal sealed class MetricsBridge : IDisposable
             resetCredits = new { count = quota.ResetCreditCount, earliestExpiry = quota.EarliestCreditExpiry }
         };
 
-        return new { capturedAt = now, claude = Provider(snapshot.Claude), codex = Provider(snapshot.Codex) };
+        return new
+        {
+            capturedAt = now,
+            claude = Provider(snapshot.Claude),
+            codex = Provider(snapshot.Codex),
+            claudeEndpointRequests = snapshot.ClaudeEndpointRequests
+        };
     }
 
     public void Dispose() => Stop();

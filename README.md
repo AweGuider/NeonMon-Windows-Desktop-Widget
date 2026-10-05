@@ -25,6 +25,7 @@ Quota pulse never calls a model and never uses API keys. Its sources are local:
 
   The script writes `%LOCALAPPDATA%\NeonMon\claude-statusline.json` whenever a CLI session renders its status line. The Claude desktop app does not run status lines, so Claude values refresh only when you use the `claude` CLI; older values are marked stale.
 - **Codex:** the newest session log under `~/.codex/sessions`, plus a read-only `codex app-server` call (`account/rateLimits/read`) every 30 minutes for fresh limits and reset credits. The read does not consume quota.
+- **Claude live endpoint fallback (off by default):** when enabled from the tray menu and the statusline data is stale, NeonMon reads plan usage from `api.anthropic.com/api/oauth/usage` with the existing Claude CLI sign-in in `~/.claude/.credentials.json`. It only reads that file, never refreshes or stores tokens, waits at least five minutes between requests, backs off on errors, and skips the call when the sign-in has expired. The endpoint is undocumented and may change.
 
 Values show remaining quota by default; switch to used quota from the tray menu (**Show quota as**). Run `NeonMon.exe --dump-quota quota.json` to write the current quota data to a file.
 

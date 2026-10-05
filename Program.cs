@@ -17,7 +17,7 @@ internal static class Program
         using var settingsStore = new SettingsStore();
         var settings = settingsStore.Load();
         using var telemetry = new TelemetryService();
-        using var quota = new QuotaService();
+        using var quota = new QuotaService(() => settings.Quota?.ClaudeEndpointFallback == true);
         using var bridge = new MetricsBridge(() => telemetry.Latest, () => quota.Latest);
         using var context = new NeonMonContext(settings, settingsStore, telemetry, quota, bridge);
 
@@ -73,7 +73,11 @@ internal static class Program
                     return 2;
                 }
 
-                quota.RefreshLocal();
+                if (!SelfTestClaudeEndpoint(settings, quota))
+                {
+                    return 4;
+                }
+
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
                 var json = client.GetStringAsync($"http://127.0.0.1:{bridge.Port}/api/v1/metrics").GetAwaiter().GetResult();
                 using var document = JsonDocument.Parse(json);
@@ -107,6 +111,26 @@ internal static class Program
         {
             context.QuotaForm.SetSnapshot(quota.RefreshAllAsync().GetAwaiter().GetResult());
         }
+    }
+
+    private static bool SelfTestClaudeEndpoint(AppSettings settings, QuotaService quota)
+    {
+        const string sample = """
+            {"five_hour":{"utilization":19.0,"resets_at":"2026-10-05T02:19:59.543Z"},
+             "seven_day":{"utilization":27.0,"resets_at":"2026-10-09T15:59:59.543Z"}}
+            """;
+        using var document = JsonDocument.Parse(sample);
+        var parsed = ClaudeUsageEndpoint.Parse(document.RootElement, "Pro", DateTimeOffset.Now);
+        var parsedCorrectly = parsed is { FiveHour.UsedPercent: 19, Weekly.UsedPercent: 27 }
+            && parsed.FiveHour.ResetsAt == new DateTimeOffset(2026, 10, 5, 2, 19, 59, 543, TimeSpan.Zero);
+
+        if (settings.Quota is not null)
+        {
+            settings.Quota.ClaudeEndpointFallback = false;
+        }
+
+        var snapshot = quota.RefreshAllAsync().GetAwaiter().GetResult();
+        return parsedCorrectly && snapshot.ClaudeEndpointRequests == 0;
     }
 
     private static string? ArgumentValue(string[] args, string name)

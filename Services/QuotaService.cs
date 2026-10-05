@@ -8,7 +8,7 @@ internal sealed class QuotaService : IDisposable
     private static readonly TimeSpan AppServerRetry = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan AppServerRefreshOnOpen = TimeSpan.FromMinutes(10);
 
-    private static readonly TimeSpan EndpointRefreshWhileOpen = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan EndpointRefreshWhileOpen = TimeSpan.FromMinutes(2);
 
     private readonly Func<bool> _claudeEndpointEnabled;
     private readonly ClaudeStatuslineReader _claude = new();

@@ -10,7 +10,7 @@ namespace NeonMon.Services;
 internal sealed class ClaudeUsageEndpoint : IDisposable
 {
     private const string UsageUrl = "https://api.anthropic.com/api/oauth/usage";
-    private static readonly TimeSpan MinimumInterval = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan MinimumInterval = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan MaximumBackoff = TimeSpan.FromMinutes(60);
 
     private static readonly string CredentialsPath = Path.Combine(

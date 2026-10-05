@@ -5,10 +5,19 @@ namespace NeonMon.UI;
 
 internal static class TrayIcon
 {
-    private static readonly int[] Sizes = [16, 20, 24, 32, 48];
+    private static readonly int[] Sizes = [16, 20, 24, 32, 40, 48, 64, 256];
 
-    // Builds a multi-size ICO in memory (PNG frames) with the pulse glyph used by the strips.
     public static Icon Create()
+    {
+        using var stream = new MemoryStream(CreateIcoBytes());
+        return new Icon(stream, SystemInformation.SmallIconSize);
+    }
+
+    // NeonMon.ico (the executable icon) is generated from this drawing with --export-icon.
+    public static void Export(string path) => File.WriteAllBytes(path, CreateIcoBytes());
+
+    // Builds a multi-size ICO (PNG frames) with the pulse glyph used by the strips.
+    private static byte[] CreateIcoBytes()
     {
         var frames = Sizes.Select(size => (Size: size, Png: DrawFrame(size))).ToList();
         using var stream = new MemoryStream();
@@ -37,8 +46,7 @@ internal static class TrayIcon
             }
         }
 
-        stream.Position = 0;
-        return new Icon(stream, SystemInformation.SmallIconSize);
+        return stream.ToArray();
     }
 
     private static byte[] DrawFrame(int size)
@@ -49,15 +57,17 @@ internal static class TrayIcon
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             var scale = size / 16f;
             var radius = 3.5f * scale;
+            var borderWidth = Math.Max(1f, 0.8f * scale);
             using var path = new GraphicsPath();
-            var bounds = new RectangleF(0.5f, 0.5f, size - 1, size - 1);
+            var inset = borderWidth / 2f;
+            var bounds = new RectangleF(inset, inset, size - 2 * inset, size - 2 * inset);
             path.AddArc(bounds.X, bounds.Y, radius * 2, radius * 2, 180, 90);
             path.AddArc(bounds.Right - radius * 2, bounds.Y, radius * 2, radius * 2, 270, 90);
             path.AddArc(bounds.Right - radius * 2, bounds.Bottom - radius * 2, radius * 2, radius * 2, 0, 90);
             path.AddArc(bounds.X, bounds.Bottom - radius * 2, radius * 2, radius * 2, 90, 90);
             path.CloseFigure();
             using var background = new SolidBrush(Color.FromArgb(255, 7, 16, 21));
-            using var border = new Pen(Color.FromArgb(150, 49, 247, 210), Math.Max(1f, 0.8f * scale));
+            using var border = new Pen(Color.FromArgb(150, 49, 247, 210), borderWidth);
             graphics.FillPath(background, path);
             graphics.DrawPath(border, path);
 

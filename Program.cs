@@ -9,7 +9,7 @@ internal static class Program
 {
     private const string InstanceMutexName = @"Local\NeonMon.Instance";
     private const string OpenSignalName = @"Local\NeonMon.Open";
-    private static readonly string[] ToolArguments = ["--render-preview", "--render-peek-preview", "--self-test", "--dump-quota"];
+    private static readonly string[] ToolArguments = ["--render-preview", "--render-peek-preview", "--self-test", "--dump-quota", "--export-icon"];
 
     [STAThread]
     private static int Main(string[] args)
@@ -31,6 +31,12 @@ internal static class Program
             }
 
             openSignal = new EventWaitHandle(false, EventResetMode.AutoReset, OpenSignalName);
+        }
+
+        if (ArgumentValue(args, "--export-icon") is { } iconPath)
+        {
+            TrayIcon.Export(iconPath);
+            return 0;
         }
 
         using var instanceLease = instance;

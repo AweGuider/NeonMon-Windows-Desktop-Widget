@@ -15,13 +15,13 @@ internal sealed record TelemetrySnapshot
         GpuTemperatureC = 47,
         GpuClockMhz = 1350,
         GpuMemoryClockMhz = 6000,
-        MemoryPercent = 84,
-        MemoryUsedGb = 26.6,
-        MemoryTotalGb = 32,
-        NvidiaDriver = "581.57",
+        MemoryPercent = 58,
+        MemoryUsedGb = 9.3,
+        MemoryTotalGb = 16,
+        NvidiaDriver = "000.00",
         TopProcess = "claude",
         TopProcessCpuPercent = 3.4,
-        Drives = [new DriveMetric("C:", 102, 5.4), new DriveMetric("D:", 130, 7)]
+        Drives = [new DriveMetric("C:", 214, 43), new DriveMetric("D:", 18, 9)]
     };
 
     public DateTimeOffset CapturedAt { get; init; } = DateTimeOffset.Now;

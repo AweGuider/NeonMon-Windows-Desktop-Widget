@@ -1,32 +1,65 @@
-# NeonMon
+<p align="center">
+  <img src="docs/images/banner.png" width="100%" alt="NeonMon: system stats and Claude Code + Codex usage limits, tucked into a tab on your screen edge">
+</p>
 
-NeonMon is a lightweight Windows system-monitoring widget. It stays as a thin screen-edge pulse strip, expands on hover, and opens on click.
+<p align="center">
+  <a href="https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget/actions/workflows/build.yml"><img src="https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget/releases"><img src="https://img.shields.io/github/v/release/AweGuider/NeonMon-Windows-Desktop-Widget?include_prereleases" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/AweGuider/NeonMon-Windows-Desktop-Widget" alt="License"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white" alt="Platform: Windows 10 | 11">
+</p>
 
-## Current features
+<p align="center">
+  <a href="#what-it-is">What it is</a> ·
+  <a href="#highlights">Highlights</a> ·
+  <a href="#quota-pulse-data-sources">Data sources</a> ·
+  <a href="#build-and-run">Build and run</a> ·
+  <a href="docs/gallery.md">Gallery</a> ·
+  <a href="docs/devlog.md">Devlog</a> ·
+  <a href="SECURITY.md">Security</a>
+</p>
 
-- Small, medium, and large layouts.
-- CPU/GPU load and temperature, memory use, uptime, remaining disk space, GPU clocks, top CPU process, and recent GPU-timeout diagnostics.
-- Click a disk card to open that drive's root folder in File Explorer.
-- Adjustable top, right, bottom, or left docking. Click the arrow in the header to cycle edges, or use the tray menu.
-- Pin, minimize, custom control tooltips, translucent styling, and short transition animations.
-- Optional read-only HTML integration at `http://127.0.0.1:27171/api/v1/metrics`.
-- Low-overhead sampling: every second while open; paused while collapsed unless the HTML bridge is on (then every five seconds).
-- Quota pulse: a second strip showing Claude Code and Codex 5-hour and weekly limits, reset times, pacing, and Codex reset credits.
-- Single instance: launching NeonMon again opens the running copy instead of starting a second one.
-- Strips stay on top of fullscreen apps by default; switch to hiding them from the tray menu (**Over fullscreen apps**); hiding reacts to fullscreen apps on the primary monitor only. They follow display or taskbar changes.
-- Each strip can be placed on any monitor (**Monitor** menu), and the choice is remembered. **Follow mouse** moves a hidden strip to whichever monitor the pointer is on.
+## What it is
 
-## Quota pulse
+NeonMon sits on the edge of your screen as a small tab. Hover over it for a quick glance, click it to open the full panel, and move away to let it tuck back in. It never takes a taskbar slot and does not steal focus.
+
+It has two strips:
+
+- **System pulse** shows uptime, CPU and GPU load and temperature, memory, free disk space, the busiest process, and recent GPU-timeout diagnostics.
+- **Quota pulse** shows Claude Code and Codex 5-hour and weekly limits side by side, counting down from 100%, with reset times, a weekly pace marker, a daily budget, and Codex reset credits.
+
+| Hidden | Peek | Open |
+| --- | --- | --- |
+| A tab on the screen edge | Hover for the headline numbers | Click for the full panel |
+| ![Hidden tabs](docs/images/hidden-tabs.png) | ![Quota peek](docs/images/quota-peek.png) <br> ![System peek](docs/images/system-peek.png) | ![Quota pulse, small](docs/images/quota-small.png) |
+
+![System pulse, large layout](docs/images/system-large.png)
+
+![Quota pulse, large layout](docs/images/quota-large.png)
+
+More screenshots are in the [gallery](docs/gallery.md), and the [devlog](docs/devlog.md) shows how the UI evolved.
+
+## Highlights
+
+- **Out of the way:** hidden by default and never steals focus. Strips stay above fullscreen apps by default, or can hide while a fullscreen app runs on the primary monitor (**Over fullscreen apps** menu).
+- **Light:** sampling pauses while a strip is hidden. Measured with both strips hidden, NeonMon uses about 0.1% of one CPU core and about 33 MB of memory.
+- **Multi-monitor:** put each strip on any monitor, dock it to any edge, and drag it along that edge. **Follow mouse** moves a hidden strip to whichever monitor the pointer is on. Text and layout scale correctly across monitors with different scaling.
+- **Readable anywhere:** the hidden tab pairs a dark body with a light ring, so it stays visible on white pages, bright video, and dark fullscreen video alike.
+- **Three layouts:** small, medium, and large for each strip.
+- **No paid API usage:** Quota pulse never calls a model and never uses API keys (see below).
+- **Optional local JSON bridge** for your own dashboards.
+
+## Quota pulse data sources
 
 Quota pulse never calls a model and never uses API keys. Its sources are local:
 
-- **Claude Code:** the plan limits Claude Code passes to its status line. Point the `statusLine` setting in `~/.claude/settings.json` at the bundled script:
+- **Claude Code:** the plan limits Claude Code passes to its status line. Point the `statusLine` setting in `~/.claude/settings.json` at the bundled script, replacing the path with wherever you cloned NeonMon:
 
   ```json
-  "statusLine": { "type": "command", "command": "node \"C:/Projects/Programming/NeonMon/tools/neonmon-statusline.js\"" }
+  "statusLine": { "type": "command", "command": "node \"<path-to-NeonMon>/tools/neonmon-statusline.js\"" }
   ```
 
-  The script writes `%LOCALAPPDATA%\NeonMon\claude-statusline.json` whenever a CLI session renders its status line. The Claude desktop app does not run status lines, so Claude values refresh only when you use the `claude` CLI; older values are marked stale.
+  The script writes `%LOCALAPPDATA%\NeonMon\claude-statusline.json` whenever a CLI session renders its status line. The Claude desktop app does not run status lines, so Claude values refresh only when you use the `claude` CLI; older values are marked stale. **Open Claude CLI** in the menu opens a terminal and starts `claude` in the folder set by `ClaudeCliDirectory` in `settings.json` (your user folder by default).
 - **Codex:** the newest session log under `~/.codex/sessions`, plus a read-only `codex app-server` call (`account/rateLimits/read`) every 30 minutes for fresh limits and reset credits. The read does not consume quota.
 - **Claude live endpoint fallback (off by default):** when enabled from the tray menu and the statusline data is stale, NeonMon reads plan usage from `api.anthropic.com/api/oauth/usage` with the existing Claude CLI sign-in in `~/.claude/.credentials.json`. It only reads that file, never refreshes or stores tokens, waits at least two minutes between requests, backs off on errors, and skips the call when the sign-in has expired. The endpoint is undocumented and may change.
 
@@ -49,7 +82,7 @@ dotnet build -c Release --no-restore -p:TargetPlatformDisplayName=Windows
 .\bin\Release\net9.0-windows\NeonMon.exe
 ```
 
-Settings are stored in `%LOCALAPPDATA%\NeonMon\settings.json`.
+Settings are stored in `%LOCALAPPDATA%\NeonMon\settings.json`. Launching NeonMon again opens the running copy instead of starting a second one, and `NeonMon.exe --exit` closes it.
 
 ## HTML integration
 
@@ -70,8 +103,8 @@ The bridge is disabled by default, binds only to `127.0.0.1`, and accepts no com
 
 ## Currently unavailable
 
-- Reliable fan RPM/duty telemetry. The MSI GS65 Stealth 9SG does not expose a documented, dependable tachometer mapping. NeonMon does not guess values or write unsafe embedded-controller registers.
-- CPU temperature can remain unavailable when MSI's read-only WMI interface is not exposed to the process.
+- Reliable fan RPM/duty telemetry. Many laptops do not expose a documented, dependable tachometer mapping, so NeonMon does not guess values or write embedded-controller registers.
+- CPU temperature comes from vendor sensor interfaces (currently MSI's read-only WMI interface) and shows as unavailable on machines without one.
 
 ## Potential future features
 
@@ -80,3 +113,11 @@ The bridge is disabled by default, binds only to `127.0.0.1`, and accepts no com
 - Native embeddable HTML component rather than JSON only.
 - Start-with-Windows option and packaged installer.
 - Additional documented hardware sensor backends.
+
+## Contributing
+
+Issues and small pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md), and report security issues privately as described in [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE) © 2026 AweDev

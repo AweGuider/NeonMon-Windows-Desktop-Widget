@@ -1,0 +1,34 @@
+name: Build
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Build
+        run: dotnet build -c Release
+
+      - name: Self-test
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath bin\Release\net9.0-windows\NeonMon.exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Self-test failed with exit code $($process.ExitCode)" }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: NeonMon
+          path: bin/Release/net9.0-windows/

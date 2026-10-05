@@ -7,6 +7,7 @@
   <a href="https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget/releases"><img src="https://img.shields.io/github/v/release/AweGuider/NeonMon-Windows-Desktop-Widget?include_prereleases" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/AweGuider/NeonMon-Windows-Desktop-Widget" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white" alt="Platform: Windows 10 | 11">
+  <a href="https://ko-fi.com/awedev"><img src="https://img.shields.io/badge/Ko--fi-Buy%20a%20cappuccino-794BC4?logo=ko-fi&logoColor=white" alt="Support on Ko-fi"></a>
 </p>
 
 <p align="center">
@@ -117,6 +118,12 @@ The bridge is disabled by default, binds only to `127.0.0.1`, and accepts no com
 ## Contributing
 
 Issues and small pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md), and report security issues privately as described in [SECURITY.md](SECURITY.md).
+
+## Support AweDev
+
+If NeonMon saved you time, you can buy a cappuccino to support future releases and testing. Support is optional; NeonMon stays free.
+
+[☕ Buy a Cappuccino on Ko-fi](https://ko-fi.com/awedev)
 
 ## License
 

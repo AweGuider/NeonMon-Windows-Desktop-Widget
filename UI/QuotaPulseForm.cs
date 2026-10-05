@@ -23,6 +23,7 @@ internal sealed class QuotaPulseForm : WidgetForm
     private readonly Font _chipFont = new("Segoe UI Symbol", 7f, FontStyle.Regular, GraphicsUnit.Point);
     private readonly System.Windows.Forms.Timer _pulseTimer;
     private QuotaSnapshot _snapshot = QuotaSnapshot.Empty;
+    private Rectangle _claudeLaunchArea;
     private bool _pulseOn = true;
 
     public QuotaPulseForm(QuotaSettings settings, Action saveSettings)
@@ -84,6 +85,22 @@ internal sealed class QuotaPulseForm : WidgetForm
         var flags = (quota.IsStale(now) ? 1 : 0) | (quota.UseItOrLoseIt(now) ? 2 : 0);
         return (int)Math.Round(DisplayValue(window, now)) * 4 + flags;
     }
+
+    internal event Action? ClaudeCliRequested;
+
+    protected override bool HandleBodyClick(Point point)
+    {
+        if (!_claudeLaunchArea.Contains(point))
+        {
+            return false;
+        }
+
+        ClaudeCliRequested?.Invoke();
+        return true;
+    }
+
+    protected override string? GetBodyTooltip(Point point) =>
+        _claudeLaunchArea.Contains(point) ? "Open the Claude CLI to refresh Claude data" : null;
 
     internal void RefreshDisplay()
     {
@@ -315,17 +332,23 @@ internal sealed class QuotaPulseForm : WidgetForm
     {
         var now = Clock();
         var scale = DeviceDpi / 96f;
+        Rectangle Area(float x, float y, float width, float height) =>
+            Rectangle.Round(new RectangleF(x * scale, y * scale, width * scale, height * scale));
+
         switch (Settings.Size)
         {
             case WidgetSize.Small:
+                _claudeLaunchArea = Area(8, 34, 56, 32);
                 DrawCompactRow(graphics, _snapshot.Claude, now, 36 * scale, WidgetSize.Small);
                 DrawCompactRow(graphics, _snapshot.Codex, now, 74 * scale, WidgetSize.Small);
                 break;
             case WidgetSize.Medium:
+                _claudeLaunchArea = Area(8, 34, 100, 42);
                 DrawCompactRow(graphics, _snapshot.Claude, now, 38 * scale, WidgetSize.Medium);
                 DrawCompactRow(graphics, _snapshot.Codex, now, 82 * scale, WidgetSize.Medium);
                 break;
             default:
+                _claudeLaunchArea = Area(10, 34, 142, 72);
                 DrawLargeRow(graphics, _snapshot.Claude, now, 38 * scale);
                 using (var divider = new Pen(Color.FromArgb(22, 75, 226, 246)))
                 {

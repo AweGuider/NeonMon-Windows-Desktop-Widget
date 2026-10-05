@@ -44,6 +44,7 @@ internal sealed class NeonMonContext : ApplicationContext
         }
 
         _quota.SnapshotUpdated += QuotaForm.PostSnapshot;
+        QuotaForm.ClaudeCliRequested += OpenClaudeCli;
 
         _systemMenu = CreateMenu(SystemForm);
         _quotaMenu = CreateMenu(QuotaForm);
@@ -244,6 +245,8 @@ internal sealed class NeonMonContext : ApplicationContext
             menu.Items.Add("Open quota pulse", null, (_, _) => QuotaForm.SetRevealState(RevealState.Open));
         }
 
+        menu.Items.Add("Open Claude CLI", null, (_, _) => OpenClaudeCli());
+
         var quotaStrip = new ToolStripMenuItem("Quota pulse strip") { Checked = _quotaSettings.Enabled };
         quotaStrip.Click += (_, _) => SetQuotaEnabled(!_quotaSettings.Enabled);
         menu.Items.Add(quotaStrip);
@@ -309,6 +312,14 @@ internal sealed class NeonMonContext : ApplicationContext
         {
             QuotaForm.SetRevealState(RevealState.Hidden);
             QuotaForm.Hide();
+        }
+    }
+
+    private void OpenClaudeCli()
+    {
+        if (!ClaudeCliLauncher.Launch(_quotaSettings.ClaudeCliDirectory))
+        {
+            ShowNotice("Could not open a terminal for the Claude CLI.");
         }
     }
 

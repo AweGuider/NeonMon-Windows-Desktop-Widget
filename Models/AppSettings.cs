@@ -21,4 +21,5 @@ internal sealed class QuotaSettings : StripSettings
     public bool Enabled { get; set; } = true;
     public bool ClaudeEndpointFallback { get; set; }
     public QuotaDisplay Display { get; set; } = QuotaDisplay.Remaining;
+    public string ClaudeCliDirectory { get; set; } = @"C:\Projects\Claude";
 }

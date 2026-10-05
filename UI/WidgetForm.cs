@@ -209,8 +209,8 @@ internal abstract class WidgetForm : Form
     {
         _state = state;
         Settings.Size = size;
-        Size = GetTargetSize(state);
         _ = Handle;
+        Size = GetTargetSize(state);
         ApplyWindowRegion();
 
         using var bitmap = new Bitmap(ClientSize.Width, ClientSize.Height);

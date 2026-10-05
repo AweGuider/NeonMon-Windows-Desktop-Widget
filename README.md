@@ -13,7 +13,8 @@ NeonMon is a lightweight Windows system-monitoring widget. It stays as a thin sc
 - Low-overhead sampling: every second while open; paused while collapsed unless the HTML bridge is on (then every five seconds).
 - Quota pulse: a second strip showing Claude Code and Codex 5-hour and weekly limits, reset times, pacing, and Codex reset credits.
 - Single instance: launching NeonMon again opens the running copy instead of starting a second one.
-- Strips hide while a fullscreen app is in front and follow display or taskbar changes.
+- Strips stay on top of fullscreen apps by default; switch to hiding them from the tray menu (**Over fullscreen apps**); hiding reacts to fullscreen apps on the primary monitor only. They follow display or taskbar changes.
+- Each strip can be placed on any monitor (**Monitor** menu), and the choice is remembered. **Follow mouse** moves a hidden strip to whichever monitor the pointer is on.
 
 ## Quota pulse
 

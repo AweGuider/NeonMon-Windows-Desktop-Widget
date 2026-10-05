@@ -18,6 +18,7 @@ internal sealed class NeonMonContext : ApplicationContext
     private readonly ContextMenuStrip _quotaMenu;
     private readonly bool _quotaSettingsCreated;
     private FullscreenWatcher? _fullscreenWatcher;
+    private ForegroundWatcher? _foregroundWatcher;
     private bool _fullscreen;
     private bool _started;
     private bool _exiting;
@@ -103,6 +104,7 @@ internal sealed class NeonMonContext : ApplicationContext
             _fullscreenWatcher = null;
         }
 
+        UpdateForegroundWatcher();
         _started = true;
     }
 
@@ -123,7 +125,7 @@ internal sealed class NeonMonContext : ApplicationContext
 
         SystemForm.BeginInvoke(new Action(() =>
         {
-            if (!_fullscreen)
+            if (!HideForFullscreen)
             {
                 SystemForm.SetRevealState(RevealState.Open);
             }
@@ -159,9 +161,21 @@ internal sealed class NeonMonContext : ApplicationContext
         }
 
         _fullscreen = fullscreen;
-        if (!fullscreen)
+        ApplyFullscreen();
+    }
+
+    private bool HideForFullscreen => _fullscreen && _settings.Fullscreen == FullscreenBehavior.Hide;
+
+    private void ApplyFullscreen()
+    {
+        if (!HideForFullscreen)
         {
-            ShowStrips(reopenPinned: true);
+            if (!SystemForm.Visible)
+            {
+                ShowStrips(reopenPinned: true);
+            }
+
+            BringStripsToTop();
             return;
         }
 
@@ -169,6 +183,38 @@ internal sealed class NeonMonContext : ApplicationContext
         {
             form.SetRevealState(RevealState.Hidden);
             form.Hide();
+        }
+    }
+
+    private void SetFullscreenBehavior(FullscreenBehavior behavior)
+    {
+        _settings.Fullscreen = behavior;
+        SaveSettings();
+        UpdateForegroundWatcher();
+        ApplyFullscreen();
+    }
+
+    private void UpdateForegroundWatcher()
+    {
+        if (_settings.Fullscreen != FullscreenBehavior.StayOnTop)
+        {
+            _foregroundWatcher?.Dispose();
+            _foregroundWatcher = null;
+            return;
+        }
+
+        if (_foregroundWatcher is null)
+        {
+            _foregroundWatcher = new ForegroundWatcher();
+            _foregroundWatcher.Settled += BringStripsToTop;
+        }
+    }
+
+    private void BringStripsToTop()
+    {
+        foreach (var form in Forms.Where(form => form.Visible))
+        {
+            form.BringToTop();
         }
     }
 
@@ -239,9 +285,42 @@ internal sealed class NeonMonContext : ApplicationContext
         }
         menu.Items.Add(dockMenu);
 
+        var monitorMenu = new ToolStripMenuItem("Monitor");
+        var screens = Screen.AllScreens;
+        for (var i = 0; i < screens.Length; i++)
+        {
+            var screen = screens[i];
+            var label = $"{i + 1} · {screen.Bounds.Width}×{screen.Bounds.Height}{(screen.Primary ? " (primary)" : "")}";
+            var item = new ToolStripMenuItem(label)
+            {
+                Checked = !target.Settings.FollowMouse && target.DockScreen.DeviceName == screen.DeviceName
+            };
+            item.Click += (_, _) => target.SetMonitor(screen);
+            monitorMenu.DropDownItems.Add(item);
+        }
+        monitorMenu.DropDownItems.Add(new ToolStripSeparator());
+        var followMouse = new ToolStripMenuItem("Follow mouse")
+        {
+            Checked = target.Settings.FollowMouse,
+            ToolTipText = "While hidden, the strip moves to whichever monitor the pointer is on"
+        };
+        followMouse.Click += (_, _) => target.SetFollowMouse(!target.Settings.FollowMouse);
+        monitorMenu.DropDownItems.Add(followMouse);
+        menu.Items.Add(monitorMenu);
+
         var keepOpen = new ToolStripMenuItem("Keep open") { Checked = target.Settings.KeepOpen };
         keepOpen.Click += (_, _) => target.SetKeepOpen(!target.Settings.KeepOpen);
         menu.Items.Add(keepOpen);
+
+        var fullscreenMenu = new ToolStripMenuItem("Over fullscreen apps");
+        foreach (var behavior in Enum.GetValues<FullscreenBehavior>())
+        {
+            var label = behavior == FullscreenBehavior.StayOnTop ? "Stay on top" : "Hide";
+            var item = new ToolStripMenuItem(label) { Checked = _settings.Fullscreen == behavior };
+            item.Click += (_, _) => SetFullscreenBehavior(behavior);
+            fullscreenMenu.DropDownItems.Add(item);
+        }
+        menu.Items.Add(fullscreenMenu);
 
         var htmlBridge = new ToolStripMenuItem($"HTML bridge · 127.0.0.1:{_settings.HtmlBridgePort}") { Checked = _settings.HtmlBridgeEnabled };
         htmlBridge.Click += (_, _) => ToggleBridge();
@@ -309,7 +388,7 @@ internal sealed class NeonMonContext : ApplicationContext
         SaveSettings();
         if (enabled)
         {
-            if (!_fullscreen)
+            if (!HideForFullscreen)
             {
                 QuotaForm.Show();
                 ResolveSpacing(QuotaForm);
@@ -475,6 +554,7 @@ internal sealed class NeonMonContext : ApplicationContext
             }
 
             _fullscreenWatcher?.Dispose();
+            _foregroundWatcher?.Dispose();
             _quota.SnapshotUpdated -= QuotaForm.PostSnapshot;
             _tray.Visible = false;
             _tray.Dispose();

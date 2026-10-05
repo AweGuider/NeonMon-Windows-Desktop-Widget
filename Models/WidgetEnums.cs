@@ -27,3 +27,9 @@ internal enum QuotaDisplay
     Remaining,
     Used
 }
+
+internal enum FullscreenBehavior
+{
+    StayOnTop,
+    Hide
+}

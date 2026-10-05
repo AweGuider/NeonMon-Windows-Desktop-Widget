@@ -19,8 +19,8 @@ internal sealed class QuotaPulseForm : WidgetForm
     private static readonly Color StripTrack = Color.FromArgb(70, 91, 117, 126);
 
     private readonly QuotaSettings _quotaSettings;
-    private readonly Font _peekFont = new("Consolas", 10.5f, FontStyle.Regular, GraphicsUnit.Point);
-    private readonly Font _chipFont = new("Segoe UI Symbol", 7f, FontStyle.Regular, GraphicsUnit.Point);
+    private Font _peekFont = null!;
+    private Font _chipFont = null!;
     private readonly System.Windows.Forms.Timer _pulseTimer;
     private QuotaSnapshot _snapshot = QuotaSnapshot.Empty;
     private Rectangle _claudeLaunchArea;
@@ -129,7 +129,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         }
     }
 
-    protected override Size GetLogicalHiddenSize(bool horizontal) => horizontal ? new Size(88, 6) : new Size(6, 88);
+    protected override Size GetLogicalHiddenSize(bool horizontal) => horizontal ? new Size(120, 9) : new Size(9, 120);
 
     protected override Size GetLogicalOpenSize(WidgetSize size) => size switch
     {
@@ -188,28 +188,24 @@ internal sealed class QuotaPulseForm : WidgetForm
 
     protected override void DrawHidden(Graphics graphics)
     {
-        using var background = new SolidBrush(Color.FromArgb(225, 6, 15, 20));
-        graphics.FillRectangle(background, ClientRectangle);
-
+        var core = DrawHiddenTab(graphics);
         var scale = DeviceDpi / 96f;
         var now = Clock();
-        var length = IsHorizontal ? Width : Height;
-        var padding = 6 * scale;
-        var cap = 3 * scale;
+        var length = IsHorizontal ? core.Width : core.Height;
+        var cap = 4 * scale;
         var capGap = 2 * scale;
-        var middleGap = 6 * scale;
-        var segment = (length - 2 * (padding + cap + capGap) - middleGap) / 2f;
-        var thickness = Math.Max(1f, scale);
+        var middleGap = 4 * scale;
+        var segment = (length - 2 * (cap + capGap) - middleGap) / 2f;
 
-        FillAlong(graphics, ClaudeTint, padding, cap, 2 * scale);
-        FillAlong(graphics, CodexTint, length - padding - cap, cap, 2 * scale);
-        DrawStripSegment(graphics, _snapshot.Claude, now, padding + cap + capGap, segment, thickness);
-        DrawStripSegment(graphics, _snapshot.Codex, now, padding + cap + capGap + segment + middleGap, segment, thickness);
+        FillAlong(graphics, core, ClaudeTint, 0, cap, 1);
+        FillAlong(graphics, core, CodexTint, length - cap, cap, 1);
+        DrawStripSegment(graphics, core, _snapshot.Claude, now, cap + capGap, segment);
+        DrawStripSegment(graphics, core, _snapshot.Codex, now, cap + capGap + segment + middleGap, segment);
     }
 
-    private void DrawStripSegment(Graphics graphics, ProviderQuota quota, DateTimeOffset now, float start, float length, float thickness)
+    private void DrawStripSegment(Graphics graphics, RectangleF core, ProviderQuota quota, DateTimeOffset now, float start, float length)
     {
-        FillAlong(graphics, StripTrack, start, length, thickness);
+        FillAlong(graphics, core, StripTrack, start, length, 1);
         var window = quota.WorstWindow(now);
         if (window is null)
         {
@@ -221,22 +217,26 @@ internal sealed class QuotaPulseForm : WidgetForm
         var color = pulsing ? Ice : StatusColor(remaining);
         var alpha = quota.IsStale(now) ? 110 : pulsing && !_pulseOn ? 140 : 255;
         var fraction = (float)Math.Clamp(DisplayValue(window, now) / 100d, 0, 1);
-        FillAlong(graphics, Color.FromArgb(alpha, color), start, Math.Max(thickness, length * fraction), pulsing ? thickness * 1.6f : thickness);
+        var thickness = IsHorizontal ? core.Height : core.Width;
+        FillAlong(graphics, core, Color.FromArgb(alpha, color), start, Math.Max(thickness, length * fraction), pulsing ? 1.4f : 1);
     }
 
-    private void FillAlong(Graphics graphics, Color color, float start, float length, float thickness)
+    // Fills part of the hidden-strip bar; start and length run along the strip, widen scales it across.
+    private void FillAlong(Graphics graphics, RectangleF core, Color color, float start, float length, float widen)
     {
-        using var brush = new SolidBrush(color);
+        RectangleF bounds;
         if (IsHorizontal)
         {
-            var y = Settings.DockEdge == DockEdge.Top ? Height - thickness : 0;
-            graphics.FillRectangle(brush, start, y, length, thickness);
+            var thickness = core.Height * widen;
+            bounds = new RectangleF(core.Left + start, core.Top + (core.Height - thickness) / 2f, length, thickness);
         }
         else
         {
-            var x = Settings.DockEdge == DockEdge.Left ? Width - thickness : 0;
-            graphics.FillRectangle(brush, x, start, thickness, length);
+            var thickness = core.Width * widen;
+            bounds = new RectangleF(core.Left + (core.Width - thickness) / 2f, core.Top + start, thickness, length);
         }
+
+        FillPill(graphics, color, bounds);
     }
 
     protected override void DrawPeek(Graphics graphics)
@@ -705,13 +705,22 @@ internal sealed class QuotaPulseForm : WidgetForm
         graphics.DrawString(value, font, brush, bounds, format);
     }
 
+    protected override void CreateFonts()
+    {
+        base.CreateFonts();
+        _peekFont?.Dispose();
+        _chipFont?.Dispose();
+        _peekFont = CreateFont("Consolas", 10.5f, FontStyle.Regular);
+        _chipFont = CreateFont("Segoe UI Symbol", 7f, FontStyle.Regular);
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
             _pulseTimer.Dispose();
-            _peekFont.Dispose();
-            _chipFont.Dispose();
+            _peekFont?.Dispose();
+            _chipFont?.Dispose();
         }
 
         base.Dispose(disposing);

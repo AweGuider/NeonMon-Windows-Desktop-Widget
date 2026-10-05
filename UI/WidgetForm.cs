@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using NeonMon.Models;
 
 namespace NeonMon.UI;
@@ -14,16 +15,18 @@ internal abstract class WidgetForm : Form
     protected static readonly Color Muted = Color.FromArgb(104, 147, 157);
     protected static readonly Color Track = Color.FromArgb(30, 91, 117, 126);
     protected static readonly Color Warning = Color.FromArgb(255, 173, 84);
+    private static readonly Color HiddenRing = Color.FromArgb(205, 222, 226);
+    private static readonly Color HiddenBody = Color.FromArgb(6, 15, 20);
 
     private const int HiddenHoverInterval = 200;
     private const int RevealedHoverInterval = 80;
 
-    protected readonly Font LabelFont = new("Segoe UI", 7.5f, FontStyle.Regular, GraphicsUnit.Point);
-    protected readonly Font DetailFont = new("Segoe UI", 7.5f, FontStyle.Regular, GraphicsUnit.Point);
-    protected readonly Font ValueFont = new("Consolas", 13.5f, FontStyle.Regular, GraphicsUnit.Point);
-    protected readonly Font UptimeFont = new("Consolas", 17f, FontStyle.Regular, GraphicsUnit.Point);
-    protected readonly Font HeaderFont = new("Segoe UI", 7.5f, FontStyle.Bold, GraphicsUnit.Point);
-    protected readonly Font IconFont = new("Segoe UI Symbol", 10.5f, FontStyle.Bold, GraphicsUnit.Point);
+    protected Font LabelFont { get; private set; } = null!;
+    protected Font DetailFont { get; private set; } = null!;
+    protected Font ValueFont { get; private set; } = null!;
+    protected Font UptimeFont { get; private set; } = null!;
+    protected Font HeaderFont { get; private set; } = null!;
+    protected Font IconFont { get; private set; } = null!;
 
     private readonly Action _saveSettings;
     private readonly System.Windows.Forms.Timer _animationTimer;
@@ -53,7 +56,8 @@ internal abstract class WidgetForm : Form
     {
         Settings = settings;
         _saveSettings = saveSettings;
-        _dockScreen = Screen.PrimaryScreen ?? Screen.AllScreens[0];
+        _dockScreen = FindScreen(settings.Monitor);
+        CreateFonts();
 
         AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Color.FromArgb(7, 16, 21);
@@ -154,7 +158,7 @@ internal abstract class WidgetForm : Form
 
     protected abstract string Title { get; }
 
-    protected virtual Size GetLogicalHiddenSize(bool horizontal) => horizontal ? new Size(72, 6) : new Size(6, 72);
+    protected virtual Size GetLogicalHiddenSize(bool horizontal) => horizontal ? new Size(96, 9) : new Size(9, 96);
 
     protected virtual Size GetLogicalPeekSize(bool horizontal) => horizontal ? new Size(72, 28) : new Size(28, 72);
 
@@ -175,6 +179,31 @@ internal abstract class WidgetForm : Form
     }
 
     protected void ShowNotice(string text) => NoticeRequested?.Invoke(text);
+
+    // Fonts are sized in pixels for this window's monitor; GDI+ point sizes would follow the primary monitor's DPI.
+    protected Font CreateFont(string family, float points, FontStyle style) =>
+        new(family, points * DeviceDpi / 72f, style, GraphicsUnit.Pixel);
+
+    protected virtual void CreateFonts()
+    {
+        DisposeFonts();
+        LabelFont = CreateFont("Segoe UI", 7.5f, FontStyle.Regular);
+        DetailFont = CreateFont("Segoe UI", 7.5f, FontStyle.Regular);
+        ValueFont = CreateFont("Consolas", 13.5f, FontStyle.Regular);
+        UptimeFont = CreateFont("Consolas", 17f, FontStyle.Regular);
+        HeaderFont = CreateFont("Segoe UI", 7.5f, FontStyle.Bold);
+        IconFont = CreateFont("Segoe UI Symbol", 10.5f, FontStyle.Bold);
+    }
+
+    private void DisposeFonts()
+    {
+        LabelFont?.Dispose();
+        DetailFont?.Dispose();
+        ValueFont?.Dispose();
+        UptimeFont?.Dispose();
+        HeaderFont?.Dispose();
+        IconFont?.Dispose();
+    }
 
     internal void SavePreview(string path, WidgetSize size = WidgetSize.Large, RevealState state = RevealState.Open)
     {
@@ -203,11 +232,57 @@ internal abstract class WidgetForm : Form
     internal void SetDockEdge(DockEdge edge)
     {
         Settings.DockEdge = edge;
-        _dockScreen = Screen.FromPoint(Cursor.Position);
         LayoutCommitted?.Invoke(this);
         SaveSettings();
         SetRevealState(_state, true);
     }
+
+    internal void SetMonitor(Screen screen)
+    {
+        Settings.FollowMouse = false;
+        Settings.Monitor = screen.DeviceName;
+        MoveToScreen(screen);
+        SaveSettings();
+    }
+
+    internal void SetFollowMouse(bool followMouse)
+    {
+        Settings.FollowMouse = followMouse;
+        if (!followMouse)
+        {
+            Settings.Monitor = _dockScreen.DeviceName;
+        }
+
+        SaveSettings();
+    }
+
+    internal void BringToTop()
+    {
+        if (IsHandleCreated)
+        {
+            SetWindowPos(Handle, HwndTopmost, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+        }
+    }
+
+    private void MoveToScreen(Screen screen)
+    {
+        _dockScreen = screen;
+        LayoutCommitted?.Invoke(this);
+        if (!IsHandleCreated)
+        {
+            return;
+        }
+
+        _animationTimer.Stop();
+        Bounds = CalculateBounds(_state);
+        ApplyWindowRegion();
+        Invalidate();
+    }
+
+    private static Screen FindScreen(string? deviceName) =>
+        Screen.AllScreens.FirstOrDefault(screen => screen.DeviceName == deviceName)
+        ?? Screen.PrimaryScreen
+        ?? Screen.AllScreens[0];
 
     internal void SetKeepOpen(bool keepOpen)
     {
@@ -230,6 +305,11 @@ internal abstract class WidgetForm : Form
 
         _state = state;
         _hoverTimer.Interval = state == RevealState.Hidden ? HiddenHoverInterval : RevealedHoverInterval;
+        if (state != RevealState.Hidden)
+        {
+            BringToTop();
+        }
+
         OnRevealStateChanged(state);
         _animationStart = Bounds;
         _animationTarget = CalculateBounds(state);
@@ -262,9 +342,7 @@ internal abstract class WidgetForm : Form
 
     internal void ReattachToScreen()
     {
-        _dockScreen = Screen.AllScreens.FirstOrDefault(screen => screen.DeviceName == _dockScreen.DeviceName)
-            ?? Screen.PrimaryScreen
-            ?? Screen.AllScreens[0];
+        _dockScreen = FindScreen(Settings.FollowMouse ? _dockScreen.DeviceName : Settings.Monitor ?? _dockScreen.DeviceName);
         if (!IsHandleCreated || _animationTimer.Enabled)
         {
             return;
@@ -500,7 +578,13 @@ internal abstract class WidgetForm : Form
             return;
         }
 
-        var inside = GetHoverBounds().Contains(Cursor.Position);
+        var cursor = Cursor.Position;
+        if (_state == RevealState.Hidden && Settings.FollowMouse && !_dockScreen.Bounds.Contains(cursor))
+        {
+            MoveToScreen(Screen.FromPoint(cursor));
+        }
+
+        var inside = GetHoverBounds().Contains(cursor);
         if (_state == RevealState.Hidden && inside)
         {
             if (CanRevealNow())
@@ -612,25 +696,110 @@ internal abstract class WidgetForm : Form
         }
     }
 
+    protected override void OnHandleCreated(EventArgs args)
+    {
+        base.OnHandleCreated(args);
+        CreateFonts();
+    }
+
     protected override void OnPaintBackground(PaintEventArgs args)
     {
     }
 
+    // Every size is derived from DeviceDpi, so skip WinForms' rescale and re-dock at the new DPI.
+    protected override void OnDpiChanged(DpiChangedEventArgs args)
+    {
+        args.Cancel = true;
+        base.OnDpiChanged(args);
+        CreateFonts();
+        if (_animationTimer.Enabled)
+        {
+            _animationTarget = CalculateBounds(_state);
+            return;
+        }
+
+        Bounds = CalculateBounds(_state);
+        ApplyWindowRegion();
+        Invalidate();
+    }
+
     protected virtual void DrawHidden(Graphics graphics)
     {
-        using var background = new SolidBrush(Color.FromArgb(225, 6, 15, 20));
-        graphics.FillRectangle(background, ClientRectangle);
-        using var line = new Pen(Cyan, Math.Max(1f, DeviceDpi / 96f));
-        if (IsHorizontal)
+        var core = DrawHiddenTab(graphics);
+        FillPill(graphics, Cyan, core);
+    }
+
+    // A dark tab hanging off the dock edge with a light outer ring, so it reads on both light and dark
+    // backgrounds. Returns the bar area inside the tab, which subclasses fill.
+    protected RectangleF DrawHiddenTab(Graphics graphics)
+    {
+        var scale = DeviceDpi / 96f;
+        var ring = Math.Max(1f, (float)Math.Round(scale));
+        using (var ringBrush = new SolidBrush(HiddenRing))
         {
-            var y = Settings.DockEdge == DockEdge.Top ? Height - 1 : 0;
-            graphics.DrawLine(line, Width * 0.22f, y, Width * 0.78f, y);
+            graphics.FillRectangle(ringBrush, ClientRectangle);
         }
-        else
+
+        var body = Settings.DockEdge switch
         {
-            var x = Settings.DockEdge == DockEdge.Left ? Width - 1 : 0;
-            graphics.DrawLine(line, x, Height * 0.22f, x, Height * 0.78f);
+            DockEdge.Top => new RectangleF(0, 0, Width, Height - ring),
+            DockEdge.Bottom => new RectangleF(0, ring, Width, Height - ring),
+            DockEdge.Left => new RectangleF(0, 0, Width - ring, Height),
+            _ => new RectangleF(ring, 0, Width - ring, Height)
+        };
+        body.Inflate(IsHorizontal ? -ring : 0, IsHorizontal ? 0 : -ring);
+        using (var bodyPath = TabPath(body, HiddenRadius() - ring))
+        using (var bodyBrush = new SolidBrush(HiddenBody))
+        {
+            graphics.FillPath(bodyBrush, bodyPath);
         }
+
+        var inset = 3 * scale;
+        var thickness = 3 * scale;
+        return IsHorizontal
+            ? new RectangleF(body.Left + inset, body.Top + (body.Height - thickness) / 2f, body.Width - 2 * inset, thickness)
+            : new RectangleF(body.Left + (body.Width - thickness) / 2f, body.Top + inset, thickness, body.Height - 2 * inset);
+    }
+
+    protected static void FillPill(Graphics graphics, Color color, RectangleF bounds)
+    {
+        using var brush = new SolidBrush(color);
+        using var path = RoundedRectangle(bounds, Math.Min(bounds.Width, bounds.Height) / 2f);
+        graphics.FillPath(brush, path);
+    }
+
+    private float HiddenRadius() => 4 * DeviceDpi / 96f;
+
+    // Rounds only the corners on the open side, away from the dock edge.
+    private GraphicsPath TabPath(RectangleF rectangle, float radius)
+    {
+        var diameter = Math.Max(0, Math.Min(radius * 2, Math.Min(rectangle.Width, rectangle.Height)));
+        var path = new GraphicsPath();
+        if (diameter <= 1)
+        {
+            path.AddRectangle(rectangle);
+            return path;
+        }
+
+        var edge = Settings.DockEdge;
+        void Corner(bool round, float x, float y, float arcX, float arcY, float startAngle)
+        {
+            if (round)
+            {
+                path.AddArc(arcX, arcY, diameter, diameter, startAngle, 90);
+            }
+            else
+            {
+                path.AddLine(x, y, x, y);
+            }
+        }
+
+        Corner(edge is DockEdge.Bottom or DockEdge.Right, rectangle.Left, rectangle.Top, rectangle.Left, rectangle.Top, 180);
+        Corner(edge is DockEdge.Bottom or DockEdge.Left, rectangle.Right, rectangle.Top, rectangle.Right - diameter, rectangle.Top, 270);
+        Corner(edge is DockEdge.Top or DockEdge.Left, rectangle.Right, rectangle.Bottom, rectangle.Right - diameter, rectangle.Bottom - diameter, 0);
+        Corner(edge is DockEdge.Top or DockEdge.Right, rectangle.Left, rectangle.Bottom, rectangle.Left, rectangle.Bottom - diameter, 90);
+        path.CloseFigure();
+        return path;
     }
 
     protected void DrawPeekOutline(Graphics graphics)
@@ -729,8 +898,9 @@ internal abstract class WidgetForm : Form
             return;
         }
 
-        var radius = _state == RevealState.Hidden ? 3f : 12f * DeviceDpi / 96f;
-        using var path = RoundedRectangle(new Rectangle(0, 0, Width, Height), radius);
+        using var path = _state == RevealState.Hidden
+            ? TabPath(new Rectangle(0, 0, Width, Height), HiddenRadius())
+            : RoundedRectangle(new Rectangle(0, 0, Width, Height), 12f * DeviceDpi / 96f);
         Region?.Dispose();
         Region = new Region(path);
     }
@@ -768,6 +938,15 @@ internal abstract class WidgetForm : Form
         }
     }
 
+    private static readonly nint HwndTopmost = -1;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoActivate = 0x0010;
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(nint window, nint insertAfter, int x, int y, int width, int height, uint flags);
+
     protected override void OnFormClosing(FormClosingEventArgs args)
     {
         if (!_exiting && args.CloseReason == CloseReason.UserClosing)
@@ -788,12 +967,7 @@ internal abstract class WidgetForm : Form
             _collapseTimer.Dispose();
             _hoverTimer.Dispose();
             _toolTip.Dispose();
-            LabelFont.Dispose();
-            DetailFont.Dispose();
-            ValueFont.Dispose();
-            UptimeFont.Dispose();
-            HeaderFont.Dispose();
-            IconFont.Dispose();
+            DisposeFonts();
         }
 
         base.Dispose(disposing);

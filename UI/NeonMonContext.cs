@@ -1,3 +1,4 @@
+using Microsoft.Win32;
 using NeonMon.Models;
 using NeonMon.Services;
 
@@ -11,10 +12,14 @@ internal sealed class NeonMonContext : ApplicationContext
     private readonly TelemetryService _telemetry;
     private readonly QuotaService _quota;
     private readonly MetricsBridge _bridge;
+    private readonly Icon _trayIcon;
     private readonly NotifyIcon _tray;
     private readonly ContextMenuStrip _systemMenu;
     private readonly ContextMenuStrip _quotaMenu;
     private readonly bool _quotaSettingsCreated;
+    private FullscreenWatcher? _fullscreenWatcher;
+    private bool _fullscreen;
+    private bool _started;
     private bool _exiting;
 
     public NeonMonContext(AppSettings settings, SettingsStore settingsStore, TelemetryService telemetry, QuotaService quota, MetricsBridge bridge)
@@ -45,9 +50,10 @@ internal sealed class NeonMonContext : ApplicationContext
         SystemForm.ContextMenuStrip = _systemMenu;
         QuotaForm.ContextMenuStrip = _quotaMenu;
 
+        _trayIcon = TrayIcon.Create();
         _tray = new NotifyIcon
         {
-            Icon = SystemIcons.Information,
+            Icon = _trayIcon,
             Text = "NeonMon",
             Visible = false,
             ContextMenuStrip = _systemMenu
@@ -70,13 +76,7 @@ internal sealed class NeonMonContext : ApplicationContext
     {
         QuotaForm.SetSnapshot(_quota.RefreshLocal());
         _quota.Start();
-        SystemForm.Show();
-        if (_quotaSettings.Enabled)
-        {
-            QuotaForm.Show();
-            ResolveSpacing(QuotaForm);
-            QuotaForm.AnimateToLayout();
-        }
+        ShowStrips();
 
         if (_quotaSettingsCreated)
         {
@@ -90,6 +90,98 @@ internal sealed class NeonMonContext : ApplicationContext
         }
 
         _telemetry.SetBackgroundSampling(_bridge.IsRunning);
+        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+        try
+        {
+            _fullscreenWatcher = new FullscreenWatcher();
+            _fullscreenWatcher.FullscreenChanged += OnFullscreenChanged;
+        }
+        catch
+        {
+            _fullscreenWatcher = null;
+        }
+
+        _started = true;
+    }
+
+    public void ActivateFromSecondInstance()
+    {
+        if (!SystemForm.IsHandleCreated || SystemForm.IsDisposed)
+        {
+            return;
+        }
+
+        SystemForm.BeginInvoke(new Action(() =>
+        {
+            if (!_fullscreen)
+            {
+                SystemForm.SetRevealState(RevealState.Open);
+            }
+        }));
+    }
+
+    private void ShowStrips(bool reopenPinned = false)
+    {
+        SystemForm.Show();
+        if (_quotaSettings.Enabled)
+        {
+            QuotaForm.Show();
+            ResolveSpacing(QuotaForm);
+            QuotaForm.AnimateToLayout();
+        }
+
+        if (!reopenPinned)
+        {
+            return;
+        }
+
+        foreach (var form in Forms.Where(form => form.Visible && form.Settings.KeepOpen))
+        {
+            form.SetRevealState(RevealState.Open);
+        }
+    }
+
+    private void OnFullscreenChanged(bool fullscreen)
+    {
+        if (_fullscreen == fullscreen)
+        {
+            return;
+        }
+
+        _fullscreen = fullscreen;
+        if (!fullscreen)
+        {
+            ShowStrips(reopenPinned: true);
+            return;
+        }
+
+        foreach (var form in Forms)
+        {
+            form.SetRevealState(RevealState.Hidden);
+            form.Hide();
+        }
+    }
+
+    private void OnDisplaySettingsChanged(object? sender, EventArgs args) => ReattachStrips();
+
+    private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs args)
+    {
+        if (args.Category == UserPreferenceCategory.Desktop)
+        {
+            ReattachStrips();
+        }
+    }
+
+    private void ReattachStrips()
+    {
+        foreach (var form in Forms)
+        {
+            form.ReattachToScreen();
+        }
+
+        ResolveSpacing(QuotaForm);
+        QuotaForm.AnimateToLayout();
     }
 
     private static QuotaSettings CreateDefaultQuotaSettings(AppSettings settings) => new()
@@ -206,9 +298,12 @@ internal sealed class NeonMonContext : ApplicationContext
         SaveSettings();
         if (enabled)
         {
-            QuotaForm.Show();
-            ResolveSpacing(QuotaForm);
-            QuotaForm.AnimateToLayout();
+            if (!_fullscreen)
+            {
+                QuotaForm.Show();
+                ResolveSpacing(QuotaForm);
+                QuotaForm.AnimateToLayout();
+            }
         }
         else
         {
@@ -354,9 +449,17 @@ internal sealed class NeonMonContext : ApplicationContext
     {
         if (disposing)
         {
+            if (_started)
+            {
+                SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+                SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+            }
+
+            _fullscreenWatcher?.Dispose();
             _quota.SnapshotUpdated -= QuotaForm.PostSnapshot;
             _tray.Visible = false;
             _tray.Dispose();
+            _trayIcon.Dispose();
             SystemForm.Dispose();
             QuotaForm.Dispose();
             _systemMenu.Dispose();

@@ -10,8 +10,10 @@ NeonMon is a lightweight Windows system-monitoring widget. It stays as a thin sc
 - Adjustable top, right, bottom, or left docking. Click the arrow in the header to cycle edges, or use the tray menu.
 - Pin, minimize, custom control tooltips, translucent styling, and short transition animations.
 - Optional read-only HTML integration at `http://127.0.0.1:27171/api/v1/metrics`.
-- Low-overhead sampling: every second while open and every five seconds while collapsed.
+- Low-overhead sampling: every second while open; paused while collapsed unless the HTML bridge is on (then every five seconds).
 - Quota pulse: a second strip showing Claude Code and Codex 5-hour and weekly limits, reset times, pacing, and Codex reset credits.
+- Single instance: launching NeonMon again opens the running copy instead of starting a second one.
+- Strips hide while a fullscreen app is in front and follow display or taskbar changes.
 
 ## Quota pulse
 
@@ -59,7 +61,11 @@ const metrics = await fetch('http://127.0.0.1:27171/api/v1/metrics')
 
 Quota data is available at `http://127.0.0.1:27171/api/v1/quota`.
 
-The bridge is disabled by default, binds only to `127.0.0.1`, and accepts no commands.
+The bridge is disabled by default, binds only to `127.0.0.1`, and accepts no commands. Browser pages can read it only from loopback origins (`http://localhost:*`, `http://127.0.0.1:*`). To allow another page, such as a hosted dashboard, add its exact origin to `HtmlBridgeAllowedOrigins` in `settings.json`:
+
+```json
+"HtmlBridgeAllowedOrigins": ["https://dashboard.example"]
+```
 
 ## Currently unavailable
 

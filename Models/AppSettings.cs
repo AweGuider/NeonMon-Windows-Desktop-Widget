@@ -12,6 +12,7 @@ internal sealed class AppSettings : StripSettings
 {
     public bool HtmlBridgeEnabled { get; set; }
     public int HtmlBridgePort { get; set; } = 27171;
+    public List<string> HtmlBridgeAllowedOrigins { get; set; } = [];
     public QuotaSettings? Quota { get; set; }
 }
 

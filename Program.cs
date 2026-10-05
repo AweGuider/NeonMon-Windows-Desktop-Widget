@@ -7,6 +7,10 @@ namespace NeonMon;
 
 internal static class Program
 {
+    private const string InstanceMutexName = @"Local\NeonMon.Instance";
+    private const string OpenSignalName = @"Local\NeonMon.Open";
+    private static readonly string[] ToolArguments = ["--render-preview", "--render-peek-preview", "--self-test", "--dump-quota"];
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -14,11 +18,28 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
+        Mutex? instance = null;
+        EventWaitHandle? openSignal = null;
+        if (!args.Any(argument => ToolArguments.Contains(argument, StringComparer.OrdinalIgnoreCase)))
+        {
+            instance = new Mutex(true, InstanceMutexName, out var createdNew);
+            if (!createdNew)
+            {
+                instance.Dispose();
+                SignalRunningInstance();
+                return 0;
+            }
+
+            openSignal = new EventWaitHandle(false, EventResetMode.AutoReset, OpenSignalName);
+        }
+
+        using var instanceLease = instance;
+        using var openSignalLease = openSignal;
         using var settingsStore = new SettingsStore();
         var settings = settingsStore.Load();
         using var telemetry = new TelemetryService();
         using var quota = new QuotaService(() => settings.Quota?.ClaudeEndpointFallback == true);
-        using var bridge = new MetricsBridge(() => telemetry.Latest, () => quota.Latest);
+        using var bridge = new MetricsBridge(() => telemetry.Latest, () => quota.Latest, () => settings.HtmlBridgeAllowedOrigins);
         using var context = new NeonMonContext(settings, settingsStore, telemetry, quota, bridge);
 
         var useSample = args.Contains("--sample", StringComparer.OrdinalIgnoreCase);
@@ -84,6 +105,11 @@ internal static class Program
                 using var document = JsonDocument.Parse(json);
                 var quotaJson = client.GetStringAsync($"http://127.0.0.1:{bridge.Port}/api/v1/quota").GetAwaiter().GetResult();
                 using var quotaDocument = JsonDocument.Parse(quotaJson);
+                if (!SelfTestBridgeOrigins(client, bridge.Port))
+                {
+                    return 5;
+                }
+
                 return document.RootElement.TryGetProperty("cpuPercent", out _)
                     && quotaDocument.RootElement.TryGetProperty("claude", out _)
                     && quotaDocument.RootElement.TryGetProperty("codex", out _) ? 0 : 3;
@@ -94,9 +120,25 @@ internal static class Program
             }
         }
 
+        var openRegistration = openSignal is null
+            ? null
+            : ThreadPool.RegisterWaitForSingleObject(openSignal, (_, _) => context.ActivateFromSecondInstance(), null, Timeout.Infinite, executeOnlyOnce: false);
         context.Start();
         Application.Run(context);
+        openRegistration?.Unregister(null);
         return 0;
+    }
+
+    private static void SignalRunningInstance()
+    {
+        try
+        {
+            using var signal = EventWaitHandle.OpenExisting(OpenSignalName);
+            signal.Set();
+        }
+        catch
+        {
+        }
     }
 
     private static void PreparePreview(NeonMonContext context, TelemetryService telemetry, QuotaService quota, bool useSample)
@@ -112,6 +154,21 @@ internal static class Program
         {
             context.QuotaForm.SetSnapshot(quota.RefreshAllAsync().GetAwaiter().GetResult());
         }
+    }
+
+    private static bool SelfTestBridgeOrigins(HttpClient client, int port)
+    {
+        string? AllowedOrigin(string origin)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/api/v1/quota");
+            request.Headers.TryAddWithoutValidation("Origin", origin);
+            using var response = client.Send(request);
+            return response.Headers.TryGetValues("Access-Control-Allow-Origin", out var values) ? values.FirstOrDefault() : null;
+        }
+
+        return AllowedOrigin("https://example.com") is null
+            && AllowedOrigin("null") is null
+            && AllowedOrigin("http://localhost:5173") == "http://localhost:5173";
     }
 
     private static bool SelfTestClaudeEndpoint(AppSettings settings, QuotaService quota)

@@ -260,6 +260,21 @@ internal abstract class WidgetForm : Form
         Invalidate();
     }
 
+    internal void ReattachToScreen()
+    {
+        _dockScreen = Screen.AllScreens.FirstOrDefault(screen => screen.DeviceName == _dockScreen.DeviceName)
+            ?? Screen.PrimaryScreen
+            ?? Screen.AllScreens[0];
+        if (!IsHandleCreated || _animationTimer.Enabled)
+        {
+            return;
+        }
+
+        Bounds = CalculateBounds(_state);
+        ApplyWindowRegion();
+        Invalidate();
+    }
+
     internal void ScheduleCollapse()
     {
         if (!Settings.KeepOpen && !IsMenuVisible)

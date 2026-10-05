@@ -33,6 +33,7 @@ internal sealed class NvmlReader : IDisposable
     private readonly DriverVersionDelegate? _getDriverVersion;
     private readonly nint _device;
     private bool _initialized;
+    private string? _driver;
 
     public NvmlReader()
     {
@@ -92,17 +93,16 @@ internal sealed class NvmlReader : IDisposable
             memoryClock = vramClock;
         }
 
-        var driver = "Unavailable";
-        if (_getDriverVersion is not null)
+        if (_driver is null && _getDriverVersion is not null)
         {
             var bytes = new byte[96];
             if (_getDriverVersion(bytes, (uint)bytes.Length) == Success)
             {
-                driver = Encoding.ASCII.GetString(bytes, 0, Array.IndexOf(bytes, (byte)0) is var end && end >= 0 ? end : bytes.Length);
+                _driver = Encoding.ASCII.GetString(bytes, 0, Array.IndexOf(bytes, (byte)0) is var end && end >= 0 ? end : bytes.Length);
             }
         }
 
-        return new GpuMetrics(utilization, temperature, graphicsClock, memoryClock, driver);
+        return new GpuMetrics(utilization, temperature, graphicsClock, memoryClock, _driver ?? "Unavailable");
     }
 
     private nint LoadLibrary()

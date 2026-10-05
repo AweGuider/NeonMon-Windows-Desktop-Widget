@@ -45,7 +45,10 @@ internal sealed class SystemPulseForm : WidgetForm
         BeginInvoke(new Action(() =>
         {
             _snapshot = snapshot;
-            Invalidate();
+            if (State == RevealState.Open)
+            {
+                Invalidate();
+            }
         }));
     }
 

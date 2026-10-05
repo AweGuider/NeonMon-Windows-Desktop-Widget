@@ -15,6 +15,9 @@ internal abstract class WidgetForm : Form
     protected static readonly Color Track = Color.FromArgb(30, 91, 117, 126);
     protected static readonly Color Warning = Color.FromArgb(255, 173, 84);
 
+    private const int HiddenHoverInterval = 200;
+    private const int RevealedHoverInterval = 80;
+
     protected readonly Font LabelFont = new("Segoe UI", 7.5f, FontStyle.Regular, GraphicsUnit.Point);
     protected readonly Font DetailFont = new("Segoe UI", 7.5f, FontStyle.Regular, GraphicsUnit.Point);
     protected readonly Font ValueFont = new("Consolas", 13.5f, FontStyle.Regular, GraphicsUnit.Point);
@@ -97,7 +100,7 @@ internal abstract class WidgetForm : Form
             TextRenderer.DrawText(args.Graphics, args.ToolTipText, DetailFont, new Point(9, 5), Foreground, TextFormatFlags.NoPadding);
         };
 
-        _hoverTimer = new System.Windows.Forms.Timer { Interval = 80 };
+        _hoverTimer = new System.Windows.Forms.Timer { Interval = HiddenHoverInterval };
         _hoverTimer.Tick += (_, _) => EvaluatePointerState();
 
         MouseEnter += (_, _) =>
@@ -226,6 +229,7 @@ internal abstract class WidgetForm : Form
         }
 
         _state = state;
+        _hoverTimer.Interval = state == RevealState.Hidden ? HiddenHoverInterval : RevealedHoverInterval;
         OnRevealStateChanged(state);
         _animationStart = Bounds;
         _animationTarget = CalculateBounds(state);
@@ -381,6 +385,8 @@ internal abstract class WidgetForm : Form
                     return;
                 }
             }
+
+            return;
         }
 
         ToggleOpen();
@@ -505,7 +511,10 @@ internal abstract class WidgetForm : Form
             }
         }
 
-        UpdateTooltip(inside && _state == RevealState.Open ? PointToClient(Cursor.Position) : null);
+        if (_state == RevealState.Open || _hoveredTooltip is not null)
+        {
+            UpdateTooltip(inside && _state == RevealState.Open ? PointToClient(Cursor.Position) : null);
+        }
     }
 
     private void UpdateTooltip(Point? point)

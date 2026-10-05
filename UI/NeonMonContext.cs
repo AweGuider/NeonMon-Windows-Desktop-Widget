@@ -8,6 +8,7 @@ internal sealed class NeonMonContext : ApplicationContext
     private readonly AppSettings _settings;
     private readonly QuotaSettings _quotaSettings;
     private readonly SettingsStore _settingsStore;
+    private readonly TelemetryService _telemetry;
     private readonly QuotaService _quota;
     private readonly MetricsBridge _bridge;
     private readonly NotifyIcon _tray;
@@ -20,6 +21,7 @@ internal sealed class NeonMonContext : ApplicationContext
     {
         _settings = settings;
         _settingsStore = settingsStore;
+        _telemetry = telemetry;
         _quota = quota;
         _bridge = bridge;
         _quotaSettingsCreated = settings.Quota is null;
@@ -86,6 +88,8 @@ internal sealed class NeonMonContext : ApplicationContext
         {
             _settings.HtmlBridgeEnabled = false;
         }
+
+        _telemetry.SetBackgroundSampling(_bridge.IsRunning);
     }
 
     private static QuotaSettings CreateDefaultQuotaSettings(AppSettings settings) => new()
@@ -192,6 +196,7 @@ internal sealed class NeonMonContext : ApplicationContext
         }
 
         _settings.HtmlBridgeEnabled = !_settings.HtmlBridgeEnabled;
+        _telemetry.SetBackgroundSampling(_bridge.IsRunning);
         SaveSettings();
     }
 

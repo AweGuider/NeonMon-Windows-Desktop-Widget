@@ -43,6 +43,7 @@ internal static class Program
         {
             if (!useSample)
             {
+                telemetry.SetActive(true);
                 Thread.Sleep(250);
             }
 

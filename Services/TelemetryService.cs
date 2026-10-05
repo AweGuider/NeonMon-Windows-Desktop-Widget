@@ -10,8 +10,10 @@ internal sealed class TelemetryService : IDisposable
     private readonly NvmlReader _nvml = new();
     private readonly MsiEcReader _msi = new();
     private readonly Dictionary<int, ProcessSample> _processSamples = [];
+    private readonly SemaphoreSlim _wake = new(0, 1);
     private readonly Task _loop;
     private volatile bool _active;
+    private volatile bool _background;
     private int _topProcessCountdown;
     private int _eventCountdown;
     private string _topProcess = "Sampling";
@@ -21,6 +23,7 @@ internal sealed class TelemetryService : IDisposable
 
     public TelemetryService()
     {
+        _cpu.Read();
         _loop = Task.Run(SampleLoopAsync);
     }
 
@@ -28,25 +31,59 @@ internal sealed class TelemetryService : IDisposable
 
     public event Action<TelemetrySnapshot>? SnapshotUpdated;
 
-    public void SetActive(bool active) => _active = active;
+    public void SetActive(bool active)
+    {
+        var activated = active && !_active;
+        _active = active;
+        if (activated)
+        {
+            _topProcessCountdown = 0;
+            Wake();
+        }
+    }
+
+    // Keeps sampling every five seconds while collapsed, for consumers such as the HTML bridge.
+    public void SetBackgroundSampling(bool enabled)
+    {
+        _background = enabled;
+        if (enabled)
+        {
+            Wake();
+        }
+    }
+
+    private void Wake()
+    {
+        try
+        {
+            _wake.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+        }
+    }
 
     private async Task SampleLoopAsync()
     {
         while (!_cancellation.IsCancellationRequested)
         {
-            try
+            if (_active || _background)
             {
-                var snapshot = Capture();
-                Latest = snapshot;
-                SnapshotUpdated?.Invoke(snapshot);
-            }
-            catch
-            {
+                try
+                {
+                    var snapshot = Capture();
+                    Latest = snapshot;
+                    SnapshotUpdated?.Invoke(snapshot);
+                }
+                catch
+                {
+                }
             }
 
             try
             {
-                await Task.Delay(_active ? 1000 : 5000, _cancellation.Token).ConfigureAwait(false);
+                var delay = _active ? 1000 : _background ? 5000 : Timeout.Infinite;
+                await _wake.WaitAsync(delay, _cancellation.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -60,10 +97,10 @@ internal sealed class TelemetryService : IDisposable
         var gpu = _nvml.Read();
         var msi = _msi.Read();
 
-        if (_topProcessCountdown-- <= 0)
+        if (_active && _topProcessCountdown-- <= 0)
         {
             (_topProcess, _topProcessCpu) = ReadTopProcess();
-            _topProcessCountdown = _active ? 4 : 0;
+            _topProcessCountdown = 4;
         }
 
         if (_eventCountdown-- <= 0)
@@ -182,6 +219,7 @@ internal sealed class TelemetryService : IDisposable
         _msi.Dispose();
         _nvml.Dispose();
         _cancellation.Dispose();
+        _wake.Dispose();
     }
 
     private sealed record ProcessSample(string Name, TimeSpan CpuTime, DateTimeOffset CapturedAt);

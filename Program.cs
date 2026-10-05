@@ -9,6 +9,7 @@ internal static class Program
 {
     private const string InstanceMutexName = @"Local\NeonMon.Instance";
     private const string OpenSignalName = @"Local\NeonMon.Open";
+    private const string ExitSignalName = @"Local\NeonMon.Exit";
     private static readonly string[] ToolArguments = ["--render-preview", "--render-peek-preview", "--self-test", "--dump-quota", "--export-icon"];
 
     [STAThread]
@@ -18,19 +19,27 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
+        if (args.Contains("--exit", StringComparer.OrdinalIgnoreCase))
+        {
+            SignalRunningInstance(ExitSignalName);
+            return 0;
+        }
+
         Mutex? instance = null;
         EventWaitHandle? openSignal = null;
+        EventWaitHandle? exitSignal = null;
         if (!args.Any(argument => ToolArguments.Contains(argument, StringComparer.OrdinalIgnoreCase)))
         {
             instance = new Mutex(true, InstanceMutexName, out var createdNew);
             if (!createdNew)
             {
                 instance.Dispose();
-                SignalRunningInstance();
+                SignalRunningInstance(OpenSignalName);
                 return 0;
             }
 
             openSignal = new EventWaitHandle(false, EventResetMode.AutoReset, OpenSignalName);
+            exitSignal = new EventWaitHandle(false, EventResetMode.AutoReset, ExitSignalName);
         }
 
         if (ArgumentValue(args, "--export-icon") is { } iconPath)
@@ -41,6 +50,7 @@ internal static class Program
 
         using var instanceLease = instance;
         using var openSignalLease = openSignal;
+        using var exitSignalLease = exitSignal;
         using var settingsStore = new SettingsStore();
         var settings = settingsStore.Load();
         using var telemetry = new TelemetryService();
@@ -129,17 +139,21 @@ internal static class Program
         var openRegistration = openSignal is null
             ? null
             : ThreadPool.RegisterWaitForSingleObject(openSignal, (_, _) => context.ActivateFromSecondInstance(), null, Timeout.Infinite, executeOnlyOnce: false);
+        var exitRegistration = exitSignal is null
+            ? null
+            : ThreadPool.RegisterWaitForSingleObject(exitSignal, (_, _) => context.ExitFromSignal(), null, Timeout.Infinite, executeOnlyOnce: true);
         context.Start();
         Application.Run(context);
         openRegistration?.Unregister(null);
+        exitRegistration?.Unregister(null);
         return 0;
     }
 
-    private static void SignalRunningInstance()
+    private static void SignalRunningInstance(string signalName)
     {
         try
         {
-            using var signal = EventWaitHandle.OpenExisting(OpenSignalName);
+            using var signal = EventWaitHandle.OpenExisting(signalName);
             signal.Set();
         }
         catch

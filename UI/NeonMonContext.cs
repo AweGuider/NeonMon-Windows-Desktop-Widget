@@ -106,6 +106,14 @@ internal sealed class NeonMonContext : ApplicationContext
         _started = true;
     }
 
+    public void ExitFromSignal()
+    {
+        if (SystemForm.IsHandleCreated && !SystemForm.IsDisposed)
+        {
+            SystemForm.BeginInvoke(new Action(Exit));
+        }
+    }
+
     public void ActivateFromSecondInstance()
     {
         if (!SystemForm.IsHandleCreated || SystemForm.IsDisposed)
@@ -349,7 +357,7 @@ internal sealed class NeonMonContext : ApplicationContext
     {
         if (ReferenceEquals(form, QuotaForm))
         {
-            _quota.SetActive(state == RevealState.Open);
+            _quota.SetActive(state != RevealState.Hidden);
         }
 
         if (state == RevealState.Hidden)

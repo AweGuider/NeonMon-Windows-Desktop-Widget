@@ -59,6 +59,14 @@ Feedback from daily use became the next batch:
 
 ![Hidden strips before and after the redesign](images/hidden-strips-before-after.png)
 
+## October 6, 2026: fixes and CLI buttons (v0.2.0)
+
+The first outside pull request fixed three real problems: **Open Claude CLI** failed on the native Claude installer, the strip menu could crash on PCs with more than one keyboard layout, and several open Claude Code sessions made the quota values jump. A follow-up kept a reset window at 100% instead of showing "no data".
+
+The Claude and Codex blocks in Quota pulse became visible buttons with a thin outline, Codex got its own **Open Codex CLI**, and a CLI that isn't installed now says so. The status line script ships with the build, with a menu item that copies its Claude setting. Uptime now counts from the last power-on or wake, because Windows Fast Startup kept the old counter running through shutdowns.
+
+![Quota pulse with outlined CLI buttons](images/history-cli-buttons.png)
+
 ## October 6, 2026: settings and pulses (v0.3.0)
 
 The right-click menu had grown into one long list where strip options, app-wide options, and Quota-only options sat side by side, with nothing saying which pulse an item affected. After a round of mockups, it split into two parts:
@@ -70,4 +78,4 @@ Every pulse can now be turned off. A pulse that is off is hidden and does no bac
 
 ![Settings window and the Quota pulse menu in the Windows and dark styles](images/history-settings-window.png)
 
-The project also got its first outside contribution around this time: a pull request in v0.2.0 and two feature requests that shape v0.4.0.
+Two feature requests from the same contributor shape v0.4.0.

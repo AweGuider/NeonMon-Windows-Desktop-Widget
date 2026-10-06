@@ -335,6 +335,7 @@ internal sealed class NeonMonContext : ApplicationContext
 
         AddCliItem(menu, QuotaProvider.Claude, "Open Claude CLI");
         AddCliItem(menu, QuotaProvider.Codex, "Open Codex CLI");
+        menu.Items.Add("Copy Claude statusLine setting", null, (_, _) => CopyStatusLineSetting());
 
         var quotaStrip = new ToolStripMenuItem("Quota pulse strip") { Checked = _quotaSettings.Enabled };
         quotaStrip.Click += (_, _) => SetQuotaEnabled(!_quotaSettings.Enabled);
@@ -533,6 +534,20 @@ internal sealed class NeonMonContext : ApplicationContext
             moved.Settings.DockOffset = offset.Value;
             SaveSettings();
         }
+    }
+
+    private void CopyStatusLineSetting()
+    {
+        var script = Path.Combine(AppContext.BaseDirectory, "tools", "neonmon-statusline.js");
+        if (!File.Exists(script))
+        {
+            ShowNotice("The status line script is missing next to NeonMon.exe.");
+            return;
+        }
+
+        var command = $"node \\\"{script.Replace('\\', '/')}\\\"";
+        Clipboard.SetText($"\"statusLine\": {{ \"type\": \"command\", \"command\": \"{command}\" }}");
+        _tray.ShowBalloonTip(4000, "NeonMon", "Copied. Paste it into ~/.claude/settings.json. Needs Node.js.", ToolTipIcon.Info);
     }
 
     private void ShowNotice(string text) => _tray.ShowBalloonTip(2500, "NeonMon", text, ToolTipIcon.Warning);

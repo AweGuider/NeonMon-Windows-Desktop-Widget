@@ -54,7 +54,7 @@ More screenshots are in the [gallery](docs/gallery.md), and the [devlog](docs/de
 
 Quota pulse never calls a model and never uses API keys. Its sources are local:
 
-- **Claude Code:** the plan limits Claude Code passes to its status line. Point the `statusLine` setting in `~/.claude/settings.json` at the bundled script, replacing the path with wherever you cloned NeonMon:
+- **Claude Code:** the plan limits Claude Code passes to its status line. This needs [Node.js](https://nodejs.org). The script ships as `tools\neonmon-statusline.js` next to `NeonMon.exe`, and **Copy Claude statusLine setting** in the menu copies the line below with the right path. Paste it into `~/.claude/settings.json`; it replaces any status line you already have:
 
   ```json
   "statusLine": { "type": "command", "command": "node \"<path-to-NeonMon>/tools/neonmon-statusline.js\"" }

@@ -58,3 +58,16 @@ Feedback from daily use became the next batch:
 - **Visibility:** the old hidden strip, a dark sliver with a thin line, nearly vanished on white pages and on dark video. Three designs were mocked up on four backgrounds, and a combination won: a tab hanging off the screen edge (its flat side against the edge) with a dark body, a bright bar, and a light outer ring.
 
 ![Hidden strips before and after the redesign](images/hidden-strips-before-after.png)
+
+## October 6, 2026: settings and pulses (v0.3.0)
+
+The right-click menu had grown into one long list where strip options, app-wide options, and Quota-only options sat side by side, with nothing saying which pulse an item affected. After a round of mockups, it split into two parts:
+
+- **Short menus:** each strip's menu is headed by its name and holds only that strip's options. Quota pulse adds its CLI shortcuts. The tray icon got its own menu.
+- **A Settings window:** General, System pulse, and Quota pulse pages, with every option labelled and short explanations where an option isn't obvious. It is drawn in the same dark style as the strips, and the menus can follow it with an optional dark style.
+
+Every pulse can now be turned off. A pulse that is off is hidden and does no background work, and with both off NeonMon stays in the tray. The Claude and Codex CLI shortcuts open in a folder you pick.
+
+![Settings window and the Quota pulse menu in the Windows and dark styles](images/history-settings-window.png)
+
+The project also got its first outside contribution around this time: a pull request in v0.2.0 and two feature requests that shape v0.4.0.

@@ -18,6 +18,8 @@ internal sealed class AppSettings : StripSettings
     public List<string> HtmlBridgeAllowedOrigins { get; set; } = [];
     public FullscreenBehavior Fullscreen { get; set; } = FullscreenBehavior.StayOnTop;
     public MenuStyle MenuStyle { get; set; } = MenuStyle.Windows;
+    public PeekValues Peek { get; set; } = PeekValues.Cpu | PeekValues.Gpu | PeekValues.Memory;
+    public List<string>? PeekDrives { get; set; }
     public QuotaSettings? Quota { get; set; }
 }
 

@@ -176,7 +176,7 @@ internal sealed class QuotaPulseForm : WidgetForm
 
     protected override Size GetLogicalHiddenSize(bool horizontal)
     {
-        var thickness = TwoLines ? 13 : 9;
+        var thickness = TwoLines ? 17 : 9;
         return horizontal ? new Size(132, thickness) : new Size(thickness, 132);
     }
 

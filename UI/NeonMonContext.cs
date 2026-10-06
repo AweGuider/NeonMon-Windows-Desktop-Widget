@@ -20,6 +20,7 @@ internal sealed class NeonMonContext : ApplicationContext
     private readonly DarkMenuRenderer _darkMenuRenderer = new();
     private SettingsForm? _settingsForm;
     private string? _sampleStatusLine;
+    private List<string> _settingsDrives = [];
     private readonly bool _quotaSettingsCreated;
     private FullscreenWatcher? _fullscreenWatcher;
     private ForegroundWatcher? _foregroundWatcher;
@@ -429,6 +430,7 @@ internal sealed class NeonMonContext : ApplicationContext
             return;
         }
 
+        _settingsDrives = TelemetryService.FixedDriveNames();
         _settingsForm = new SettingsForm(BuildSettingsPages, _trayIcon);
         _settingsForm.Show();
         _settingsForm.Activate();
@@ -437,6 +439,9 @@ internal sealed class NeonMonContext : ApplicationContext
     internal void SaveSettingsPreview(string path, int page, string? sampleStatusLine)
     {
         _sampleStatusLine = sampleStatusLine;
+        _settingsDrives = sampleStatusLine is null
+            ? TelemetryService.FixedDriveNames()
+            : TelemetrySnapshot.Sample.Drives.Select(drive => drive.Name).ToList();
         using var form = new SettingsForm(BuildSettingsPages, _trayIcon);
         form.SavePreview(path, page);
     }
@@ -476,7 +481,7 @@ internal sealed class NeonMonContext : ApplicationContext
         return
         [
             new SettingsPage("General", general),
-            new SettingsPage("System pulse", StripRows(SystemForm)),
+            new SettingsPage("System pulse", [.. StripRows(SystemForm), .. PeekRows()]),
             new SettingsPage("Quota pulse", quota),
             new SettingsPage("Support", SupportRows())
         ];
@@ -561,6 +566,75 @@ internal sealed class NeonMonContext : ApplicationContext
             new ToggleRow("Keep open", () => form.Settings.KeepOpen, form.SetKeepOpen)
         ]);
         return rows;
+    }
+
+    private List<SettingsRow> PeekRows()
+    {
+        if (!_settings.Enabled)
+        {
+            return [];
+        }
+
+        var chosen = _settings.PeekDrives ?? [TelemetryService.SystemDrive];
+        var drives = _settingsDrives.Union(chosen, StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase);
+        return
+        [
+            new SectionRow("Peek"),
+            PeekValueRow("CPU load", PeekValues.Cpu),
+            PeekValueRow("CPU temperature", PeekValues.CpuTemperature, "Needs a supported sensor (MSI today)."),
+            PeekValueRow("GPU load", PeekValues.Gpu),
+            PeekValueRow("GPU temperature", PeekValues.GpuTemperature),
+            PeekValueRow("Memory", PeekValues.Memory),
+            .. drives.Select(drive => new ToggleRow($"Drive {drive}", () => chosen.Contains(drive, StringComparer.OrdinalIgnoreCase),
+                on => SetPeekDrive(drive, on), _settingsDrives.Contains(drive, StringComparer.OrdinalIgnoreCase) ? null : "Not found.")),
+            PeekValueRow("Uptime", PeekValues.Uptime, "Since the last power-on or wake.")
+        ];
+    }
+
+    private ToggleRow PeekValueRow(string label, PeekValues value, string? hint = null) =>
+        new(label, () => _settings.Peek.HasFlag(value), on => SetPeekValue(value, on), hint);
+
+    private bool IsLastPeekValue()
+    {
+        var count = Enum.GetValues<PeekValues>().Count(value => value != PeekValues.None && _settings.Peek.HasFlag(value))
+            + (_settings.PeekDrives?.Count ?? 1);
+        if (count > 1)
+        {
+            return false;
+        }
+
+        ShowNotice("The peek needs at least one value.");
+        return true;
+    }
+
+    private void SetPeekValue(PeekValues value, bool on)
+    {
+        if (!on && IsLastPeekValue())
+        {
+            return;
+        }
+
+        _settings.Peek = on ? _settings.Peek | value : _settings.Peek & ~value;
+        SaveSettings();
+        SystemForm.PeekValuesChanged();
+    }
+
+    private void SetPeekDrive(string drive, bool on)
+    {
+        if (!on && IsLastPeekValue())
+        {
+            return;
+        }
+
+        var drives = (_settings.PeekDrives ?? [TelemetryService.SystemDrive]).Where(name => !name.Equals(drive, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (on)
+        {
+            drives.Add(drive);
+        }
+
+        _settings.PeekDrives = [.. drives.Order(StringComparer.OrdinalIgnoreCase)];
+        SaveSettings();
+        SystemForm.PeekValuesChanged();
     }
 
     private string StatusLineStatus()

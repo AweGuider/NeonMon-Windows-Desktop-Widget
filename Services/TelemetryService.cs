@@ -15,6 +15,7 @@ internal sealed class TelemetryService : IDisposable
     private volatile bool _active;
     private volatile bool _background;
     private volatile bool _peeking;
+    private volatile bool _peekTemperatures;
     private int _topProcessCountdown;
     private int _eventCountdown;
     private string _topProcess = "Sampling";
@@ -52,6 +53,8 @@ internal sealed class TelemetryService : IDisposable
             Wake();
         }
     }
+
+    public void SetPeekTemperatures(bool enabled) => _peekTemperatures = enabled;
 
     // Keeps sampling every five seconds while collapsed, for consumers such as the HTML bridge.
     public void SetBackgroundSampling(bool enabled)
@@ -116,7 +119,7 @@ internal sealed class TelemetryService : IDisposable
     private TelemetrySnapshot Capture()
     {
         var gpu = _nvml.Read();
-        var msi = _msi.Read();
+        var msi = _active || _background || _peekTemperatures ? _msi.Read() : MsiTemperatureMetrics.Unavailable;
 
         if (_active && _topProcessCountdown-- <= 0)
         {
@@ -158,12 +161,27 @@ internal sealed class TelemetryService : IDisposable
         };
     }
 
-    private static IReadOnlyList<DriveMetric> ReadDrives()
+    public static string SystemDrive => (Environment.GetEnvironmentVariable("SystemDrive") ?? "C:").TrimEnd('\\');
+
+    public static List<string> FixedDriveNames()
     {
-        var result = new List<DriveMetric>(2);
         try
         {
-            foreach (var drive in DriveInfo.GetDrives().Where(drive => drive.DriveType == DriveType.Fixed && drive.IsReady).Take(2))
+            return DriveInfo.GetDrives().Where(drive => drive.DriveType == DriveType.Fixed && drive.IsReady)
+                .Select(drive => drive.Name.TrimEnd('\\')).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static IReadOnlyList<DriveMetric> ReadDrives()
+    {
+        var result = new List<DriveMetric>();
+        try
+        {
+            foreach (var drive in DriveInfo.GetDrives().Where(drive => drive.DriveType == DriveType.Fixed && drive.IsReady))
             {
                 result.Add(new DriveMetric(
                     drive.Name.TrimEnd('\\'),

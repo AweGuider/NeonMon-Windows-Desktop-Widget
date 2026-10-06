@@ -70,7 +70,7 @@ Values show remaining quota by default; switch to used quota with **Show quota a
 
 Requirements: Windows 10/11 and the .NET 9 SDK.
 
-Double-click `build.bat`, then run:
+Double-click `build.bat`. It offers to close a running NeonMon, builds, and starts the new build (answer N to skip). The app is at:
 
 ```text
 bin\Release\net9.0-windows\NeonMon.exe

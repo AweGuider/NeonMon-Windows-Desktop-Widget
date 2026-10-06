@@ -36,8 +36,8 @@ echo Build succeeded.
 echo App: %APP_PATH%
 echo.
 set "RUN_APP="
-set /p "RUN_APP=Run NeonMon now? [y/N]: "
-if /i "%RUN_APP%"=="Y" start "" "%APP_PATH%"
+set /p "RUN_APP=Run NeonMon now? [Y/n]: "
+if /i not "%RUN_APP%"=="N" start "" "%APP_PATH%"
 goto finish
 
 :build_failed

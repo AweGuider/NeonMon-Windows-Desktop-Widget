@@ -9,6 +9,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>NeonMon.ico</ApplicationIcon>
     <AssemblyName>NeonMon</AssemblyName>
+    <Version>0.2.0</Version>
     <RootNamespace>NeonMon</RootNamespace>
     <DebugType>embedded</DebugType>
     <SelfContained>false</SelfContained>

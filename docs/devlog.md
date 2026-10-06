@@ -1,20 +1,75 @@
 # Devlog
 
-How NeonMon grew from a single system-monitor strip into a two-strip desktop widget. Every screenshot below is rendered by the build from that point in history.
+How NeonMon grew from a single system-monitor strip into a two-strip desktop widget. Every screenshot below is rendered by the build from that point in history. Newest changes come first.
 
 [Back to the README](../README.md)
 
-## October 1, 2026: first version
+## October 7, 2026: start with Windows (v0.4.2)
 
-NeonMon started as one dockable strip: a thin line on the screen edge that expands into a system panel with uptime, CPU, GPU, memory, free disk space, the busiest process, and GPU-timeout diagnostics.
+**Settings → General → Start with Windows** puts a shortcut to NeonMon in your Startup folder, the same place `shell:startup` opens, so it starts hidden at sign-in. There is no extra setting: the shortcut is the setting, and Task Manager's Startup apps can switch it off as usual. If the shortcut points to a copy in another folder, for example after moving NeonMon, Settings says so.
 
-The first build had a DPI bug: at 125% scaling, the labels above each value were clipped at the top (look at UPTIME, CPU, and GPU).
+## October 7, 2026: your peek (v0.4.1)
 
-![First version with clipped labels](images/history-v1-clipped-labels.png)
+The System pulse peek from v0.4.0 showed a fixed set of values. **Settings → System pulse → Peek** now picks what it shows: CPU and GPU load and temperature, memory, any fixed drive, and uptime, marked with a small stopwatch as suggested in the feature request. A temperature joins its load value (`CPU 12% 54°`), and the peek grows to fit whatever is chosen. Temperatures are read only while one is shown.
 
-The same day, the clipping was fixed across all three layouts, and drive cards became shortcuts that open the drive in File Explorer.
+![Settings with the Peek section, and the peek it produces in both directions](images/history-peek-values.png)
 
-![Labels fixed](images/history-v2-dpi-fix.png)
+Two smaller fixes came from daily use. The two-line Quota tab left almost no dark space between its bars and the light ring, so it grew from 13 to 17 px thick. And rendered screenshots now keep the rounded corners the app has on screen, instead of square ones, so the images in this repo match what you see.
+
+## October 6, 2026: more at a glance (v0.4.0)
+
+Two feature requests asked the same thing: say more before the strip is opened.
+
+- **Hidden Quota tab:** it showed only the tighter of the 5-hour and weekly limits, so you could not tell which one you were looking at, and it switched between them. It now shows both on two lines: weekly on the line nearest the screen edge, outlined in amber like the weekly chip in the peek, and 5-hour inside it. The Claude and Codex circles grew to fill the taller tab, and both hidden tabs got a little longer to match. One line is still available.
+- **System pulse peek:** hovering showed only a pulse icon. It now shows CPU, GPU, and memory load and free space on the system drive. Telemetry samples only while the peek is visible and skips the expensive process scan; it costs about 0.9% of one core for the few seconds a peek is open.
+
+![Hidden tabs and the System pulse peek before (top) and after (bottom)](images/history-hidden-and-peek.png)
+
+Settings also got a Support page with the Ko-fi, source, issue, and release links.
+
+## October 6, 2026: settings and pulses (v0.3.0)
+
+The right-click menu had grown into one long list where strip options, app-wide options, and Quota-only options sat side by side, with nothing saying which pulse an item affected. After a round of mockups, it split into two parts:
+
+- **Short menus:** each strip's menu is headed by its name and holds only that strip's options. Quota pulse adds its CLI shortcuts. The tray icon got its own menu.
+- **A Settings window:** General, System pulse, and Quota pulse pages, with every option labelled and short explanations where an option isn't obvious. It is drawn in the same dark style as the strips, and the menus can follow it with an optional dark style.
+
+Every pulse can now be turned off. A pulse that is off is hidden and does no background work, and with both off NeonMon stays in the tray. The Claude and Codex CLI shortcuts open in a folder you pick.
+
+![Settings window and the Quota pulse menu in the Windows and dark styles](images/history-settings-window.png)
+
+## October 6, 2026: fixes and CLI buttons (v0.2.0)
+
+The first outside pull request fixed three real problems: **Open Claude CLI** failed on the native Claude installer, the strip menu could crash on PCs with more than one keyboard layout, and several open Claude Code sessions made the quota values jump. A follow-up kept a reset window at 100% instead of showing "no data".
+
+The Claude and Codex blocks in Quota pulse became visible buttons with a thin outline, Codex got its own **Open Codex CLI**, and a CLI that isn't installed now says so. The status line script ships with the build, with a menu item that copies its Claude setting. Uptime now counts from the last power-on or wake, because Windows Fast Startup kept the old counter running through shutdowns.
+
+![Quota pulse with outlined CLI buttons](images/history-cli-buttons.png)
+
+## October 5, 2026: owner notes round
+
+Feedback from daily use became the next batch:
+
+- **Fullscreen:** strips were disappearing behind fullscreen apps. Windows can drop always-on-top windows below a newly focused fullscreen window, so NeonMon now re-asserts on-top after every focus change. Staying visible is the default, and hiding is an option.
+- **Multiple monitors:** each strip can be moved to any monitor and remembers it. **Follow mouse** moves a hidden strip to the monitor the pointer is on. Testing on two monitors with different scaling exposed text drawn 25% too large on the second one, so fonts are now sized for each monitor's DPI.
+- **Visibility:** the old hidden strip, a dark sliver with a thin line, nearly vanished on white pages and on dark video. Three designs were mocked up on four backgrounds, and a combination won: a tab hanging off the screen edge (its flat side against the edge) with a dark body, a bright bar, and a light outer ring.
+
+![Hidden strips before and after the redesign](images/hidden-strips-before-after.png)
+
+## October 5, 2026: performance and robustness
+
+A profiling pass cut idle cost. Sampling now pauses while strips are hidden, the expensive process scan only runs while the panel is open, and hidden strips repaint only when what they show actually changes.
+
+| | Before | After |
+| --- | --- | --- |
+| CPU, strips hidden | 0.52–0.70% of one core | 0.09–0.16% of one core |
+| Private memory | 39 MB | 33–34 MB |
+
+Measured by alternating before and after builds on the same machine.
+
+Robustness work followed: single instance (launching again opens the running copy), recovery from display and taskbar changes, fullscreen handling, and origin checks on the local JSON bridge.
+
+Smaller additions: the app icon, a visible reason when Claude data is stale (such as an expired CLI sign-in), a one-click **Open Claude CLI** shortcut to refresh it, and an immediate refresh when you peek.
 
 ## October 5, 2026: Quota pulse
 
@@ -34,71 +89,14 @@ Before writing code, the layout went through mockups. Decisions that came out of
 
 Rendering also gained a fixed sample-data mode, so every UI change could be checked as pixel-identical against a baseline before and after.
 
-## October 5, 2026: performance and robustness
+## October 1, 2026: first version
 
-A profiling pass cut idle cost. Sampling now pauses while strips are hidden, the expensive process scan only runs while the panel is open, and hidden strips repaint only when what they show actually changes.
+NeonMon started as one dockable strip: a thin line on the screen edge that expands into a system panel with uptime, CPU, GPU, memory, free disk space, the busiest process, and GPU-timeout diagnostics.
 
-| | Before | After |
-| --- | --- | --- |
-| CPU, strips hidden | 0.52–0.70% of one core | 0.09–0.16% of one core |
-| Private memory | 39 MB | 33–34 MB |
+The first build had a DPI bug: at 125% scaling, the labels above each value were clipped at the top (look at UPTIME, CPU, and GPU).
 
-Measured by alternating before and after builds on the same machine.
+![First version with clipped labels](images/history-v1-clipped-labels.png)
 
-Robustness work followed: single instance (launching again opens the running copy), recovery from display and taskbar changes, fullscreen handling, and origin checks on the local JSON bridge.
+The same day, the clipping was fixed across all three layouts, and drive cards became shortcuts that open the drive in File Explorer.
 
-Smaller additions: the app icon, a visible reason when Claude data is stale (such as an expired CLI sign-in), a one-click **Open Claude CLI** shortcut to refresh it, and an immediate refresh when you peek.
-
-## October 5, 2026: owner notes round
-
-Feedback from daily use became the next batch:
-
-- **Fullscreen:** strips were disappearing behind fullscreen apps. Windows can drop always-on-top windows below a newly focused fullscreen window, so NeonMon now re-asserts on-top after every focus change. Staying visible is the default, and hiding is an option.
-- **Multiple monitors:** each strip can be moved to any monitor and remembers it. **Follow mouse** moves a hidden strip to the monitor the pointer is on. Testing on two monitors with different scaling exposed text drawn 25% too large on the second one, so fonts are now sized for each monitor's DPI.
-- **Visibility:** the old hidden strip, a dark sliver with a thin line, nearly vanished on white pages and on dark video. Three designs were mocked up on four backgrounds, and a combination won: a tab hanging off the screen edge (its flat side against the edge) with a dark body, a bright bar, and a light outer ring.
-
-![Hidden strips before and after the redesign](images/hidden-strips-before-after.png)
-
-## October 6, 2026: fixes and CLI buttons (v0.2.0)
-
-The first outside pull request fixed three real problems: **Open Claude CLI** failed on the native Claude installer, the strip menu could crash on PCs with more than one keyboard layout, and several open Claude Code sessions made the quota values jump. A follow-up kept a reset window at 100% instead of showing "no data".
-
-The Claude and Codex blocks in Quota pulse became visible buttons with a thin outline, Codex got its own **Open Codex CLI**, and a CLI that isn't installed now says so. The status line script ships with the build, with a menu item that copies its Claude setting. Uptime now counts from the last power-on or wake, because Windows Fast Startup kept the old counter running through shutdowns.
-
-![Quota pulse with outlined CLI buttons](images/history-cli-buttons.png)
-
-## October 6, 2026: settings and pulses (v0.3.0)
-
-The right-click menu had grown into one long list where strip options, app-wide options, and Quota-only options sat side by side, with nothing saying which pulse an item affected. After a round of mockups, it split into two parts:
-
-- **Short menus:** each strip's menu is headed by its name and holds only that strip's options. Quota pulse adds its CLI shortcuts. The tray icon got its own menu.
-- **A Settings window:** General, System pulse, and Quota pulse pages, with every option labelled and short explanations where an option isn't obvious. It is drawn in the same dark style as the strips, and the menus can follow it with an optional dark style.
-
-Every pulse can now be turned off. A pulse that is off is hidden and does no background work, and with both off NeonMon stays in the tray. The Claude and Codex CLI shortcuts open in a folder you pick.
-
-![Settings window and the Quota pulse menu in the Windows and dark styles](images/history-settings-window.png)
-
-Two feature requests from the same contributor shape v0.4.0.
-
-## October 6, 2026: more at a glance (v0.4.0)
-
-Two feature requests asked the same thing: say more before the strip is opened.
-
-- **Hidden Quota tab:** it showed only the tighter of the 5-hour and weekly limits, so you could not tell which one you were looking at, and it switched between them. It now shows both on two lines: weekly on the line nearest the screen edge, outlined in amber like the weekly chip in the peek, and 5-hour inside it. The Claude and Codex circles grew to fill the taller tab, and both hidden tabs got a little longer to match. One line is still available.
-- **System pulse peek:** hovering showed only a pulse icon. It now shows CPU, GPU, and memory load and free space on the system drive. Telemetry samples only while the peek is visible and skips the expensive process scan; it costs about 0.9% of one core for the few seconds a peek is open.
-
-![Hidden tabs and the System pulse peek before (top) and after (bottom)](images/history-hidden-and-peek.png)
-
-Settings also got a Support page with the Ko-fi, source, issue, and release links.
-
-## October 7, 2026: your peek (v0.4.1)
-
-The System pulse peek from v0.4.0 showed a fixed set of values. **Settings → System pulse → Peek** now picks what it shows: CPU and GPU load and temperature, memory, any fixed drive, and uptime, marked with a small stopwatch as suggested in the feature request. A temperature joins its load value (`CPU 12% 54°`), and the peek grows to fit whatever is chosen. Temperatures are read only while one is shown.
-
-![Settings with the Peek section, and the peek it produces in both directions](images/history-peek-values.png)
-
-Two smaller fixes came from daily use. The two-line Quota tab left almost no dark space between its bars and the light ring, so it grew from 13 to 17 px thick. And rendered screenshots now keep the rounded corners the app has on screen, instead of square ones, so the images in this repo match what you see.
-
-## October 7, 2026: start with Windows (v0.4.2)
-
-**Settings → General → Start with Windows** puts a shortcut to NeonMon in your Startup folder, the same place `shell:startup` opens, so it starts hidden at sign-in. There is no extra setting: the shortcut is the setting, and Task Manager's Startup apps can switch it off as usual. If the shortcut points to a copy in another folder, for example after moving NeonMon, Settings says so.
+![Labels fixed](images/history-v2-dpi-fix.png)

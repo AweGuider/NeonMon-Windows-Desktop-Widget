@@ -55,7 +55,8 @@ internal static class Program
         using var settingsStore = new SettingsStore();
         var useSample = args.Contains("--sample", StringComparer.OrdinalIgnoreCase);
         var settingsPreviewIndex = Array.FindIndex(args, argument => argument.Equals("--render-settings", StringComparison.OrdinalIgnoreCase));
-        var settings = settingsPreviewIndex >= 0 && useSample ? SampleSettings() : settingsStore.Load();
+        var rendering = args.Any(argument => argument.StartsWith("--render-", StringComparison.OrdinalIgnoreCase));
+        var settings = rendering && useSample ? SampleSettings() : settingsStore.Load();
         using var telemetry = new TelemetryService();
         using var quota = new QuotaService(() => settings.Quota?.ClaudeEndpointFallback == true);
         using var bridge = new MetricsBridge(() => telemetry.Latest, () => quota.Latest, () => settings.HtmlBridgeAllowedOrigins);

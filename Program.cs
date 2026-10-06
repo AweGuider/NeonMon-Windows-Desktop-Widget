@@ -1,6 +1,7 @@
 using NeonMon.Models;
 using NeonMon.Services;
 using NeonMon.UI;
+using System.Globalization;
 using System.Text.Json;
 
 namespace NeonMon;
@@ -166,6 +167,7 @@ internal static class Program
         context.SystemForm.SetSnapshot(useSample ? TelemetrySnapshot.Sample : telemetry.Latest);
         if (useSample)
         {
+            CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
             var now = TelemetrySnapshot.Sample.CapturedAt;
             context.QuotaForm.Clock = () => now;
             context.QuotaForm.SetSnapshot(QuotaSnapshot.Sample(now));

@@ -158,7 +158,7 @@ internal abstract class WidgetForm : Form
 
     protected abstract string Title { get; }
 
-    protected virtual Size GetLogicalHiddenSize(bool horizontal) => horizontal ? new Size(96, 9) : new Size(9, 96);
+    protected virtual Size GetLogicalHiddenSize(bool horizontal) => horizontal ? new Size(132, 9) : new Size(9, 132);
 
     protected virtual Size GetLogicalPeekSize(bool horizontal) => horizontal ? new Size(72, 28) : new Size(28, 72);
 
@@ -731,7 +731,7 @@ internal abstract class WidgetForm : Form
 
     // A dark tab hanging off the dock edge with a light outer ring, so it reads on both light and dark
     // backgrounds. Returns the bar area inside the tab, which subclasses fill.
-    protected RectangleF DrawHiddenTab(Graphics graphics)
+    protected RectangleF DrawHiddenTab(Graphics graphics, float barThickness = 3)
     {
         var scale = DeviceDpi / 96f;
         var ring = Math.Max(1f, (float)Math.Round(scale));
@@ -755,7 +755,7 @@ internal abstract class WidgetForm : Form
         }
 
         var inset = 3 * scale;
-        var thickness = 3 * scale;
+        var thickness = barThickness * scale;
         return IsHorizontal
             ? new RectangleF(body.Left + inset, body.Top + (body.Height - thickness) / 2f, body.Width - 2 * inset, thickness)
             : new RectangleF(body.Left + (body.Width - thickness) / 2f, body.Top + inset, thickness, body.Height - 2 * inset);

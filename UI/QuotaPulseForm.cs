@@ -76,11 +76,13 @@ internal sealed class QuotaPulseForm : WidgetForm
         }
     }
 
-    private (int Claude, int Codex) HiddenKey(DateTimeOffset now) => (SegmentKey(_snapshot.Claude, now), SegmentKey(_snapshot.Codex, now));
+    private (int, int, int, int, int, int) HiddenKey(DateTimeOffset now) => (
+        SegmentKey(_snapshot.Claude, _snapshot.Claude.WorstWindow(now), now), SegmentKey(_snapshot.Codex, _snapshot.Codex.WorstWindow(now), now),
+        SegmentKey(_snapshot.Claude, _snapshot.Claude.Weekly, now), SegmentKey(_snapshot.Claude, _snapshot.Claude.FiveHour, now),
+        SegmentKey(_snapshot.Codex, _snapshot.Codex.Weekly, now), SegmentKey(_snapshot.Codex, _snapshot.Codex.FiveHour, now));
 
-    private int SegmentKey(ProviderQuota quota, DateTimeOffset now)
+    private int SegmentKey(ProviderQuota quota, QuotaWindow? window, DateTimeOffset now)
     {
-        var window = quota.WorstWindow(now);
         if (window is null)
         {
             return -1;
@@ -153,17 +155,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         SetHoveredLaunch(null);
     }
 
-    internal void RefreshDisplay()
-    {
-        if (State == RevealState.Peek)
-        {
-            ContentSizeChanged();
-        }
-        else
-        {
-            Invalidate();
-        }
-    }
+    internal void RefreshDisplay() => ContentSizeChanged();
 
     private void UpdatePulseTimer()
     {
@@ -180,7 +172,13 @@ internal sealed class QuotaPulseForm : WidgetForm
         }
     }
 
-    protected override Size GetLogicalHiddenSize(bool horizontal) => horizontal ? new Size(120, 9) : new Size(9, 120);
+    private bool TwoLines => _quotaSettings.HiddenTab == HiddenTabStyle.TwoLines;
+
+    protected override Size GetLogicalHiddenSize(bool horizontal)
+    {
+        var thickness = TwoLines ? 13 : 9;
+        return horizontal ? new Size(132, thickness) : new Size(thickness, 132);
+    }
 
     protected override Size GetLogicalOpenSize(WidgetSize size) => size switch
     {
@@ -239,6 +237,40 @@ internal sealed class QuotaPulseForm : WidgetForm
 
     protected override void DrawHidden(Graphics graphics)
     {
+        if (!TwoLines)
+        {
+            DrawOneLineHidden(graphics);
+            return;
+        }
+
+        var scale = DeviceDpi / 96f;
+        var weeklyThickness = 4.5f * scale;
+        var lineGap = 1.5f * scale;
+        var fiveHourThickness = 3.5f * scale;
+        var core = DrawHiddenTab(graphics, (weeklyThickness + lineGap + fiveHourThickness) / scale);
+        var now = Clock();
+        var length = IsHorizontal ? core.Width : core.Height;
+        var circle = 8.5f * scale;
+        var circleGap = 4 * scale;
+        var middleGap = 4 * scale;
+        var segment = (length - 2 * (circle + circleGap) - middleGap) / 2f;
+
+        var weeklyOnFarSide = Settings.DockEdge is DockEdge.Bottom or DockEdge.Right;
+        var weekly = Across(core, weeklyOnFarSide ? weeklyThickness + lineGap : 0, weeklyThickness);
+        var fiveHour = Across(core, weeklyOnFarSide ? 0 : weeklyThickness + lineGap, fiveHourThickness);
+
+        FillCircleAlong(graphics, core, ClaudeTint, 0, circle);
+        FillCircleAlong(graphics, core, CodexTint, length - circle, circle);
+        foreach (var (quota, start) in new[] { (_snapshot.Claude, circle + circleGap), (_snapshot.Codex, circle + circleGap + segment + middleGap) })
+        {
+            DrawStripSegment(graphics, weekly, quota, quota.Weekly, false, now, start, segment);
+            StrokeAlong(graphics, weekly, start, segment);
+            DrawStripSegment(graphics, fiveHour, quota, quota.FiveHour, quota.UseItOrLoseIt(now), now, start, segment);
+        }
+    }
+
+    private void DrawOneLineHidden(Graphics graphics)
+    {
         var core = DrawHiddenTab(graphics);
         var scale = DeviceDpi / 96f;
         var now = Clock();
@@ -250,21 +282,25 @@ internal sealed class QuotaPulseForm : WidgetForm
 
         FillAlong(graphics, core, ClaudeTint, 0, cap, 1);
         FillAlong(graphics, core, CodexTint, length - cap, cap, 1);
-        DrawStripSegment(graphics, core, _snapshot.Claude, now, cap + capGap, segment);
-        DrawStripSegment(graphics, core, _snapshot.Codex, now, cap + capGap + segment + middleGap, segment);
+        DrawStripSegment(graphics, core, _snapshot.Claude, _snapshot.Claude.WorstWindow(now), _snapshot.Claude.UseItOrLoseIt(now), now, cap + capGap, segment);
+        DrawStripSegment(graphics, core, _snapshot.Codex, _snapshot.Codex.WorstWindow(now), _snapshot.Codex.UseItOrLoseIt(now), now,
+            cap + capGap + segment + middleGap, segment);
     }
 
-    private void DrawStripSegment(Graphics graphics, RectangleF core, ProviderQuota quota, DateTimeOffset now, float start, float length)
+    private RectangleF Across(RectangleF core, float offset, float thickness) => IsHorizontal
+        ? new RectangleF(core.Left, core.Top + offset, core.Width, thickness)
+        : new RectangleF(core.Left + offset, core.Top, thickness, core.Height);
+
+    private void DrawStripSegment(Graphics graphics, RectangleF core, ProviderQuota quota, QuotaWindow? window, bool pulsing, DateTimeOffset now,
+        float start, float length)
     {
         FillAlong(graphics, core, StripTrack, start, length, 1);
-        var window = quota.WorstWindow(now);
         if (window is null)
         {
             return;
         }
 
         var remaining = window.Remaining(now);
-        var pulsing = quota.UseItOrLoseIt(now);
         var color = pulsing ? Ice : StatusColor(remaining);
         var alpha = quota.IsStale(now) ? 110 : pulsing && !_pulseOn ? 140 : 255;
         var fraction = (float)Math.Clamp(DisplayValue(window, now) / 100d, 0, 1);
@@ -273,21 +309,38 @@ internal sealed class QuotaPulseForm : WidgetForm
     }
 
     // Fills part of the hidden-strip bar; start and length run along the strip, widen scales it across.
-    private void FillAlong(Graphics graphics, RectangleF core, Color color, float start, float length, float widen)
+    private void FillAlong(Graphics graphics, RectangleF core, Color color, float start, float length, float widen) =>
+        FillPill(graphics, color, AlongBounds(core, start, length, widen));
+
+    private void StrokeAlong(Graphics graphics, RectangleF core, float start, float length)
     {
-        RectangleF bounds;
+        var width = DeviceDpi / 96f;
+        var bounds = AlongBounds(core, start, length, 1);
+        bounds.Inflate(-width / 2f, -width / 2f);
+        using var path = RoundedRectangle(bounds, Math.Min(bounds.Width, bounds.Height) / 2f);
+        using var pen = new Pen(Color.FromArgb(230, Warning), width);
+        graphics.DrawPath(pen, path);
+    }
+
+    private void FillCircleAlong(Graphics graphics, RectangleF core, Color color, float start, float diameter)
+    {
+        using var brush = new SolidBrush(color);
+        var bounds = IsHorizontal
+            ? new RectangleF(core.Left + start, core.Top + (core.Height - diameter) / 2f, diameter, diameter)
+            : new RectangleF(core.Left + (core.Width - diameter) / 2f, core.Top + start, diameter, diameter);
+        graphics.FillEllipse(brush, bounds);
+    }
+
+    private RectangleF AlongBounds(RectangleF core, float start, float length, float widen)
+    {
         if (IsHorizontal)
         {
             var thickness = core.Height * widen;
-            bounds = new RectangleF(core.Left + start, core.Top + (core.Height - thickness) / 2f, length, thickness);
-        }
-        else
-        {
-            var thickness = core.Width * widen;
-            bounds = new RectangleF(core.Left + (core.Width - thickness) / 2f, core.Top + start, thickness, length);
+            return new RectangleF(core.Left + start, core.Top + (core.Height - thickness) / 2f, length, thickness);
         }
 
-        FillPill(graphics, color, bounds);
+        var across = core.Width * widen;
+        return new RectangleF(core.Left + (core.Width - across) / 2f, core.Top + start, across, length);
     }
 
     protected override void DrawPeek(Graphics graphics)

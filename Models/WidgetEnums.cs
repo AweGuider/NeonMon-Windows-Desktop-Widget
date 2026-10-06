@@ -34,6 +34,12 @@ internal enum FullscreenBehavior
     Hide
 }
 
+internal enum HiddenTabStyle
+{
+    TwoLines,
+    OneLine
+}
+
 internal enum MenuStyle
 {
     Windows,

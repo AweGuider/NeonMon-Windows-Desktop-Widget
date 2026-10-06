@@ -355,6 +355,16 @@ internal sealed class NeonMonContext : ApplicationContext
                 displayMenu.DropDownItems.Add(item);
             }
             stripItems.Add(displayMenu);
+
+            var hiddenTabMenu = new ToolStripMenuItem("Hidden tab");
+            foreach (var style in Enum.GetValues<HiddenTabStyle>())
+            {
+                var label = style == HiddenTabStyle.TwoLines ? "Two lines (weekly + 5-hour)" : "One line (worst limit)";
+                var item = new ToolStripMenuItem(label) { Checked = _quotaSettings.HiddenTab == style };
+                item.Click += (_, _) => SetHiddenTab(style);
+                hiddenTabMenu.DropDownItems.Add(item);
+            }
+            stripItems.Add(hiddenTabMenu);
         }
 
         foreach (var item in stripItems)
@@ -443,6 +453,8 @@ internal sealed class NeonMonContext : ApplicationContext
         quota.AddRange(
         [
             new ChoiceRow("Show quota as", ["Remaining", "Used"], () => (int)_quotaSettings.Display, index => SetQuotaDisplay((QuotaDisplay)index)),
+            new ChoiceRow("Hidden tab", ["Two lines", "One line"], () => (int)_quotaSettings.HiddenTab, index => SetHiddenTab((HiddenTabStyle)index),
+                "Two lines: weekly outside, 5-hour inside. One line: the tighter limit."),
             new SectionRow("Claude"),
             new ActionRow("Status line data", StatusLineStatus, "Copy setting", CopyStatusLineSetting,
                 "Claude Code sends limits through its status line. Needs Node.js."),
@@ -616,6 +628,13 @@ internal sealed class NeonMonContext : ApplicationContext
         _quotaSettings.ClaudeEndpointFallback = enabled;
         SaveSettings();
         _quota.RequestRefresh();
+    }
+
+    private void SetHiddenTab(HiddenTabStyle style)
+    {
+        _quotaSettings.HiddenTab = style;
+        SaveSettings();
+        QuotaForm.RefreshDisplay();
     }
 
     private void SetQuotaDisplay(QuotaDisplay display)

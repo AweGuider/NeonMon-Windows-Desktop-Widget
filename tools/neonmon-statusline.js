@@ -23,7 +23,7 @@ process.stdin.on('end', () => {
 
 // Every open session redraws its status line with the last limits it saw, so an idle session would
 // roll the saved numbers back. Merge per window instead: a later resets_at wins, within one window the
-// higher usage wins, and windows that have already reset are dropped.
+// higher usage wins. Windows that have already reset are kept: NeonMon shows them as fully available.
 function save(incoming, version) {
   let stored = {};
   try { stored = JSON.parse(fs.readFileSync(target, 'utf8')).rate_limits || {}; } catch {}
@@ -32,27 +32,32 @@ function save(incoming, version) {
   const merged = {};
   let current = false;
   for (const name of new Set([...Object.keys(stored), ...Object.keys(incoming)])) {
-    const mine = live(incoming[name], nowSeconds);
-    const best = pick(live(stored[name], nowSeconds), mine);
+    const mine = valid(incoming[name]);
+    const best = pick(valid(stored[name]), mine);
     if (best) merged[name] = best;
-    if (mine && best === mine) current = true;
+    if (mine && best === mine && mine.resets_at > nowSeconds) current = true;
   }
 
   // A stale session neither changes the numbers nor refreshes savedAt.
   if (!current && JSON.stringify(merged) === JSON.stringify(stored)) return;
   fs.mkdirSync(path.dirname(target), { recursive: true });
   const temporary = `${target}.${process.pid}.tmp`;
-  fs.writeFileSync(temporary, JSON.stringify({
-    savedAt: new Date().toISOString(),
-    version,
-    rate_limits: merged
-  }));
-  fs.renameSync(temporary, target);
+  try {
+    fs.writeFileSync(temporary, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      version,
+      rate_limits: merged
+    }));
+    fs.renameSync(temporary, target);
+  } catch (error) {
+    try { fs.unlinkSync(temporary); } catch {}
+    throw error;
+  }
 }
 
-function live(window, nowSeconds) {
+function valid(window) {
   return window && typeof window.used_percentage === 'number' && typeof window.resets_at === 'number'
-    && window.resets_at > nowSeconds ? window : null;
+    ? window : null;
 }
 
 function pick(a, b) {

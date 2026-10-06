@@ -12,7 +12,8 @@
     <RootNamespace>NeonMon</RootNamespace>
     <DebugType>embedded</DebugType>
     <SelfContained>false</SelfContained>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- WinForms resolves the keyboard layout's culture on WM_INPUTLANGCHANGE; invariant mode throws there. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
     <TieredPGO>true</TieredPGO>
     <ServerGarbageCollection>false</ServerGarbageCollection>
   </PropertyGroup>

@@ -24,6 +24,10 @@ internal sealed class QuotaPulseForm : WidgetForm
     private readonly System.Windows.Forms.Timer _pulseTimer;
     private QuotaSnapshot _snapshot = QuotaSnapshot.Empty;
     private Rectangle _claudeLaunchArea;
+    private Rectangle _codexLaunchArea;
+    private bool _claudeCliInstalled = true;
+    private bool _codexCliInstalled = true;
+    private QuotaProvider? _hoveredLaunch;
     private bool _pulseOn = true;
 
     public QuotaPulseForm(QuotaSettings settings, Action saveSettings)
@@ -86,21 +90,68 @@ internal sealed class QuotaPulseForm : WidgetForm
         return (int)Math.Round(DisplayValue(window, now)) * 4 + flags;
     }
 
-    internal event Action? ClaudeCliRequested;
+    internal event Action<QuotaProvider>? CliRequested;
+
+    internal void SetCliAvailability(bool claude, bool codex)
+    {
+        if (claude == _claudeCliInstalled && codex == _codexCliInstalled)
+        {
+            return;
+        }
+
+        _claudeCliInstalled = claude;
+        _codexCliInstalled = codex;
+        Invalidate();
+    }
+
+    private bool IsCliInstalled(QuotaProvider provider) => provider == QuotaProvider.Claude ? _claudeCliInstalled : _codexCliInstalled;
+
+    private bool IsMissing(ProviderQuota quota) => !IsCliInstalled(quota.Provider) && !quota.HasData;
+
+    private QuotaProvider? LaunchAreaAt(Point point) =>
+        _claudeLaunchArea.Contains(point) ? QuotaProvider.Claude : _codexLaunchArea.Contains(point) ? QuotaProvider.Codex : null;
 
     protected override bool HandleBodyClick(Point point)
     {
-        if (!_claudeLaunchArea.Contains(point))
+        if (LaunchAreaAt(point) is not { } provider)
         {
             return false;
         }
 
-        ClaudeCliRequested?.Invoke();
+        if (IsCliInstalled(provider))
+        {
+            CliRequested?.Invoke(provider);
+        }
+
         return true;
     }
 
-    protected override string? GetBodyTooltip(Point point) =>
-        _claudeLaunchArea.Contains(point) ? "Open the Claude CLI to refresh Claude data" : null;
+    protected override string? GetBodyTooltip(Point point)
+    {
+        var provider = LaunchAreaAt(point);
+        SetHoveredLaunch(provider);
+        return provider switch
+        {
+            QuotaProvider.Claude => _claudeCliInstalled ? "Open the Claude CLI to refresh Claude data" : "Claude CLI not installed",
+            QuotaProvider.Codex => _codexCliInstalled ? "Open the Codex CLI" : "Codex CLI not installed",
+            _ => null
+        };
+    }
+
+    private void SetHoveredLaunch(QuotaProvider? provider)
+    {
+        if (provider != _hoveredLaunch)
+        {
+            _hoveredLaunch = provider;
+            Invalidate();
+        }
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        base.OnMouseLeave(e);
+        SetHoveredLaunch(null);
+    }
 
     internal void RefreshDisplay()
     {
@@ -134,7 +185,7 @@ internal sealed class QuotaPulseForm : WidgetForm
     protected override Size GetLogicalOpenSize(WidgetSize size) => size switch
     {
         WidgetSize.Small => new Size(400, 112),
-        WidgetSize.Medium => new Size(520, 128),
+        WidgetSize.Medium => new Size(520, 140),
         _ => new Size(660, 200)
     };
 
@@ -339,16 +390,22 @@ internal sealed class QuotaPulseForm : WidgetForm
         {
             case WidgetSize.Small:
                 _claudeLaunchArea = Area(8, 34, 56, 32);
+                _codexLaunchArea = Area(8, 72, 56, 32);
+                DrawLaunchOutlines(graphics);
                 DrawCompactRow(graphics, _snapshot.Claude, now, 36 * scale, WidgetSize.Small);
                 DrawCompactRow(graphics, _snapshot.Codex, now, 74 * scale, WidgetSize.Small);
                 break;
             case WidgetSize.Medium:
-                _claudeLaunchArea = Area(8, 34, 100, 42);
+                _claudeLaunchArea = Area(8, 33, 100, 45);
+                _codexLaunchArea = Area(8, 84, 100, 45);
+                DrawLaunchOutlines(graphics);
                 DrawCompactRow(graphics, _snapshot.Claude, now, 38 * scale, WidgetSize.Medium);
-                DrawCompactRow(graphics, _snapshot.Codex, now, 82 * scale, WidgetSize.Medium);
+                DrawCompactRow(graphics, _snapshot.Codex, now, 89 * scale, WidgetSize.Medium);
                 break;
             default:
                 _claudeLaunchArea = Area(10, 34, 142, 72);
+                _codexLaunchArea = Area(10, 114, 142, 72);
+                DrawLaunchOutlines(graphics);
                 DrawLargeRow(graphics, _snapshot.Claude, now, 38 * scale);
                 using (var divider = new Pen(Color.FromArgb(22, 75, 226, 246)))
                 {
@@ -360,11 +417,37 @@ internal sealed class QuotaPulseForm : WidgetForm
         }
     }
 
+    private void DrawLaunchOutlines(Graphics graphics)
+    {
+        DrawLaunchOutline(graphics, QuotaProvider.Claude, _claudeLaunchArea);
+        DrawLaunchOutline(graphics, QuotaProvider.Codex, _codexLaunchArea);
+    }
+
+    private void DrawLaunchOutline(Graphics graphics, QuotaProvider provider, Rectangle area)
+    {
+        if (!IsCliInstalled(provider))
+        {
+            return;
+        }
+
+        var scale = DeviceDpi / 96f;
+        var hovered = _hoveredLaunch == provider;
+        using var path = RoundedRectangle(new RectangleF(area.X + 0.5f, area.Y + 0.5f, area.Width - 1, area.Height - 1), 5 * scale);
+        if (hovered)
+        {
+            using var fill = new SolidBrush(Color.FromArgb(18, 75, 226, 246));
+            graphics.FillPath(fill, path);
+        }
+
+        using var border = new Pen(Color.FromArgb(hovered ? 165 : 72, 75, 226, 246));
+        graphics.DrawPath(border, path);
+    }
+
     private void DrawCompactRow(Graphics graphics, ProviderQuota quota, DateTimeOffset now, float top, WidgetSize size)
     {
         var scale = DeviceDpi / 96f;
         var small = size == WidgetSize.Small;
-        DrawGlyph(graphics, quota.Provider, new RectangleF(14 * scale, top + 3 * scale, 15 * scale, 15 * scale));
+        DrawGlyph(graphics, quota.Provider, new RectangleF(14 * scale, top + 3 * scale, 15 * scale, 15 * scale), IsCliInstalled(quota.Provider) ? 255 : 90);
 
         if (small)
         {
@@ -387,8 +470,8 @@ internal sealed class QuotaPulseForm : WidgetForm
             }
 
             var note = EndpointNote(quota, now);
-            var age = note is null ? AgeText(quota, now) : note[^1];
-            DrawText(graphics, age, DetailFont, AgeColor(quota, now), new RectangleF(14 * scale, top + 23 * scale, 92 * scale, TextLineHeight(graphics, DetailFont, 2 * scale)));
+            var age = IsMissing(quota) ? "CLI not installed" : note is null ? AgeText(quota, now) : note[^1];
+            DrawText(graphics, age, DetailFont, IsMissing(quota) ? Muted : AgeColor(quota, now), new RectangleF(14 * scale, top + 23 * scale, 92 * scale, TextLineHeight(graphics, DetailFont, 2 * scale)));
         }
 
         var firstX = (small ? 72 : 116) * scale;
@@ -408,7 +491,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         var valueColor = window is null ? Muted : ValueColor(quota, window, now, fiveHour);
         DrawText(graphics, value, ValueFont, valueColor, new RectangleF(area.X, area.Y, area.Width * 0.45f, valueHeight));
 
-        var detail = window is null ? "no data" : fiveHour ? FiveHourDetail(window, now, size) : WeeklyDetail(window, now, size);
+        var detail = window is null ? IsMissing(quota) ? "not installed" : "no data" : fiveHour ? FiveHourDetail(window, now, size) : WeeklyDetail(window, now, size);
         var flagged = fiveHour && quota.UseItOrLoseIt(now);
         DrawTextRight(graphics, detail, DetailFont, flagged ? PulseColor(Warning) : Muted,
             new RectangleF(area.X, area.Y + valueHeight - detailHeight - 2 * scale, area.Width, detailHeight));
@@ -422,7 +505,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         var detailHeight = TextLineHeight(graphics, DetailFont, 2 * scale);
         var left = 16 * scale;
 
-        DrawGlyph(graphics, quota.Provider, new RectangleF(left, top, 14 * scale, 14 * scale));
+        DrawGlyph(graphics, quota.Provider, new RectangleF(left, top, 14 * scale, 14 * scale), IsCliInstalled(quota.Provider) ? 255 : 90);
         var name = quota.Provider == QuotaProvider.Claude ? "CLAUDE" : "CODEX";
         var nameWidth = MeasureText(graphics, name, LabelFont);
         DrawText(graphics, name, LabelFont, Muted, new RectangleF(left + 19 * scale, top + scale, nameWidth + 2, labelHeight));
@@ -448,6 +531,10 @@ internal sealed class QuotaPulseForm : WidgetForm
             {
                 DrawText(graphics, note[i], DetailFont, Warning, new RectangleF(left, lineTop + (i + 1) * 14 * scale, 132 * scale, detailHeight));
             }
+        }
+        else if (IsMissing(quota))
+        {
+            DrawText(graphics, "CLI not installed", DetailFont, Muted, new RectangleF(left, lineTop, 132 * scale, detailHeight));
         }
         else
         {
@@ -481,7 +568,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         var detailColor = Muted;
         if (window is null)
         {
-            detail = "no data";
+            detail = IsMissing(quota) ? "not installed" : "no data";
         }
         else if (fiveHour && quota.UseItOrLoseIt(now))
         {
@@ -656,7 +743,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         return chip.Width;
     }
 
-    private void DrawGlyph(Graphics graphics, QuotaProvider provider, RectangleF box)
+    private void DrawGlyph(Graphics graphics, QuotaProvider provider, RectangleF box, int alpha = 255)
     {
         var size = Math.Min(box.Width, box.Height);
         var centerX = box.X + box.Width / 2f;
@@ -664,7 +751,7 @@ internal sealed class QuotaPulseForm : WidgetForm
 
         if (provider == QuotaProvider.Claude)
         {
-            using var pen = new Pen(ClaudeTint, Math.Max(1.2f, size * 0.12f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            using var pen = new Pen(Color.FromArgb(alpha, ClaudeTint), Math.Max(1.2f, size * 0.12f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
             var radius = size * 0.42f;
             for (var i = 0; i < 4; i++)
             {
@@ -677,7 +764,7 @@ internal sealed class QuotaPulseForm : WidgetForm
             return;
         }
 
-        using var stroke = new Pen(CodexTint, Math.Max(1f, size * 0.09f)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+        using var stroke = new Pen(Color.FromArgb(alpha, CodexTint), Math.Max(1f, size * 0.09f)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
         var frame = new RectangleF(centerX - size * 0.45f, centerY - size * 0.4f, size * 0.9f, size * 0.8f);
         using var framePath = RoundedRectangle(frame, size * 0.18f);
         graphics.DrawPath(stroke, framePath);

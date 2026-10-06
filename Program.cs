@@ -168,6 +168,7 @@ internal static class Program
         if (useSample)
         {
             CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+            context.QuotaForm.SetCliAvailability(true, true);
             var now = TelemetrySnapshot.Sample.CapturedAt;
             context.QuotaForm.Clock = () => now;
             context.QuotaForm.SetSnapshot(QuotaSnapshot.Sample(now));

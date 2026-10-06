@@ -45,7 +45,8 @@ internal sealed class NeonMonContext : ApplicationContext
         }
 
         _quota.SnapshotUpdated += QuotaForm.PostSnapshot;
-        QuotaForm.ClaudeCliRequested += OpenClaudeCli;
+        QuotaForm.CliRequested += OpenCli;
+        RefreshCliAvailability();
 
         _systemMenu = CreateMenu(SystemForm);
         _quotaMenu = CreateMenu(QuotaForm);
@@ -332,7 +333,8 @@ internal sealed class NeonMonContext : ApplicationContext
             menu.Items.Add("Open quota pulse", null, (_, _) => QuotaForm.SetRevealState(RevealState.Open));
         }
 
-        menu.Items.Add("Open Claude CLI", null, (_, _) => OpenClaudeCli());
+        AddCliItem(menu, QuotaProvider.Claude, "Open Claude CLI");
+        AddCliItem(menu, QuotaProvider.Codex, "Open Codex CLI");
 
         var quotaStrip = new ToolStripMenuItem("Quota pulse strip") { Checked = _quotaSettings.Enabled };
         quotaStrip.Click += (_, _) => SetQuotaEnabled(!_quotaSettings.Enabled);
@@ -402,11 +404,28 @@ internal sealed class NeonMonContext : ApplicationContext
         }
     }
 
-    private void OpenClaudeCli()
+    private void AddCliItem(ContextMenuStrip menu, QuotaProvider provider, string text)
     {
-        if (!ClaudeCliLauncher.Launch(_quotaSettings.ClaudeCliDirectory))
+        var installed = CliCommand(provider) is not null;
+        menu.Items.Add(new ToolStripMenuItem(installed ? text : $"{text} (not installed)", null, (_, _) => OpenCli(provider)) { Enabled = installed });
+    }
+
+    private static string? CliCommand(QuotaProvider provider) =>
+        provider == QuotaProvider.Claude ? CliLauncher.ClaudeCommand() : CliLauncher.CodexCommand();
+
+    private void RefreshCliAvailability() =>
+        QuotaForm.SetCliAvailability(CliCommand(QuotaProvider.Claude) is not null, CliCommand(QuotaProvider.Codex) is not null);
+
+    private void OpenCli(QuotaProvider provider)
+    {
+        var name = provider == QuotaProvider.Claude ? "Claude" : "Codex";
+        if (CliCommand(provider) is not { } command)
         {
-            ShowNotice("Could not open a terminal for the Claude CLI.");
+            ShowNotice($"The {name} CLI is not installed.");
+        }
+        else if (!CliLauncher.Launch(command, provider == QuotaProvider.Claude ? _quotaSettings.ClaudeCliDirectory : null))
+        {
+            ShowNotice($"Could not open a terminal for the {name} CLI.");
         }
     }
 
@@ -437,6 +456,10 @@ internal sealed class NeonMonContext : ApplicationContext
         if (ReferenceEquals(form, QuotaForm))
         {
             _quota.SetActive(state != RevealState.Hidden);
+            if (state != RevealState.Hidden)
+            {
+                RefreshCliAvailability();
+            }
         }
 
         if (state == RevealState.Hidden)

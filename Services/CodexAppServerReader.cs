@@ -158,7 +158,7 @@ internal sealed class CodexAppServerReader
         return new QuotaWindow(used, QuotaJson.ReadEpoch(window, "resetsAt"), (int)(QuotaJson.ReadNumber(window, "windowDurationMins") ?? 0));
     }
 
-    private static string? FindCodexExecutable()
+    internal static string? FindCodexExecutable()
     {
         try
         {

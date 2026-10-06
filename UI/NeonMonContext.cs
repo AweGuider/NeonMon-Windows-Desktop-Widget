@@ -21,6 +21,8 @@ internal sealed class NeonMonContext : ApplicationContext
     private SettingsForm? _settingsForm;
     private string? _sampleStatusLine;
     private List<string> _settingsDrives = [];
+    private bool _startWithWindows;
+    private bool _startupOtherCopy;
     private readonly bool _quotaSettingsCreated;
     private FullscreenWatcher? _fullscreenWatcher;
     private ForegroundWatcher? _foregroundWatcher;
@@ -431,6 +433,7 @@ internal sealed class NeonMonContext : ApplicationContext
         }
 
         _settingsDrives = TelemetryService.FixedDriveNames();
+        RefreshStartupState();
         _settingsForm = new SettingsForm(BuildSettingsPages, _trayIcon);
         _settingsForm.Show();
         _settingsForm.Activate();
@@ -442,6 +445,10 @@ internal sealed class NeonMonContext : ApplicationContext
         _settingsDrives = sampleStatusLine is null
             ? TelemetryService.FixedDriveNames()
             : TelemetrySnapshot.Sample.Drives.Select(drive => drive.Name).ToList();
+        if (sampleStatusLine is null)
+        {
+            RefreshStartupState();
+        }
         using var form = new SettingsForm(BuildSettingsPages, _trayIcon);
         form.SavePreview(path, page);
     }
@@ -457,6 +464,8 @@ internal sealed class NeonMonContext : ApplicationContext
             new SectionRow("Behaviour"),
             new ChoiceRow("Over fullscreen apps", ["Stay on top", "Hide"], () => (int)_settings.Fullscreen,
                 index => SetFullscreenBehavior((FullscreenBehavior)index)),
+            new ToggleRow("Start with Windows", () => _startWithWindows, SetStartWithWindows,
+                _startupOtherCopy ? "Starts a copy in another folder. Turn off and on to use this one." : "Adds NeonMon to your Startup folder."),
             new SectionRow("Advanced"),
             new ToggleRow($"HTML bridge · 127.0.0.1:{_settings.HtmlBridgePort}", () => _settings.HtmlBridgeEnabled, _ => ToggleBridge(),
                 "Local JSON for your own dashboards.")
@@ -655,6 +664,33 @@ internal sealed class NeonMonContext : ApplicationContext
             : age.TotalHours < 1 ? $"updated {(int)age.TotalMinutes} min ago"
             : age.TotalDays < 2 ? $"updated {(int)age.TotalHours}h ago"
             : $"updated {(int)age.TotalDays}d ago";
+    }
+
+    private void RefreshStartupState()
+    {
+        _startWithWindows = StartupShortcut.IsEnabled;
+        _startupOtherCopy = _startWithWindows && !StartupShortcut.PointsToThisCopy();
+    }
+
+    private void SetStartWithWindows(bool on)
+    {
+        try
+        {
+            if (on)
+            {
+                StartupShortcut.Enable();
+            }
+            else
+            {
+                StartupShortcut.Disable();
+            }
+        }
+        catch
+        {
+            ShowNotice("Could not change the Startup folder shortcut.");
+        }
+
+        RefreshStartupState();
     }
 
     private void SetMenuStyle(int index)

@@ -85,6 +85,8 @@ dotnet build -c Release --no-restore -p:TargetPlatformDisplayName=Windows
 .\bin\Release\net9.0-windows\NeonMon.exe
 ```
 
+**Settings → General → Start with Windows** adds a shortcut to your Startup folder that starts this copy at sign-in; if you move the folder, turn it off and on again.
+
 Settings are stored in `%LOCALAPPDATA%\NeonMon\settings.json`. Launching NeonMon again opens the running copy instead of starting a second one, and `NeonMon.exe --exit` closes it.
 
 ## HTML integration
@@ -114,7 +116,7 @@ The bridge is disabled by default, binds only to `127.0.0.1`, and accepts no com
 - Warning thresholds.
 - History graphs and lightweight data export.
 - Native embeddable HTML component rather than JSON only.
-- Start-with-Windows option and packaged installer.
+- Packaged installer.
 - Additional documented hardware sensor backends.
 
 ## Contributing

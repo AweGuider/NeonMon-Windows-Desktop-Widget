@@ -98,3 +98,7 @@ The System pulse peek from v0.4.0 showed a fixed set of values. **Settings → S
 ![Settings with the Peek section, and the peek it produces in both directions](images/history-peek-values.png)
 
 Two smaller fixes came from daily use. The two-line Quota tab left almost no dark space between its bars and the light ring, so it grew from 13 to 17 px thick. And rendered screenshots now keep the rounded corners the app has on screen, instead of square ones, so the images in this repo match what you see.
+
+## October 7, 2026: start with Windows (v0.4.2)
+
+**Settings → General → Start with Windows** puts a shortcut to NeonMon in your Startup folder, the same place `shell:startup` opens, so it starts hidden at sign-in. There is no extra setting: the shortcut is the setting, and Task Manager's Startup apps can switch it off as usual. If the shortcut points to a copy in another folder, for example after moving NeonMon, Settings says so.

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Drawing.Drawing2D;
 using NeonMon.Models;
 using NeonMon.Services;
 
@@ -6,6 +7,11 @@ namespace NeonMon.UI;
 
 internal sealed class SystemPulseForm : WidgetForm
 {
+    private const float PeekCharWidth = 7.7f;
+    private const float PeekPadding = 18;
+    private const string PeekSeparator = " · ";
+
+    private readonly AppSettings _settings;
     private readonly TelemetryService _telemetry;
     private readonly Dictionary<string, Rectangle> _driveHitAreas = [];
     private Rectangle _uptimeArea;
@@ -15,9 +21,11 @@ internal sealed class SystemPulseForm : WidgetForm
     public SystemPulseForm(AppSettings settings, Action saveSettings, TelemetryService telemetry)
         : base(settings, saveSettings)
     {
+        _settings = settings;
         _telemetry = telemetry;
         _telemetry.SnapshotUpdated += HandleSnapshot;
         _telemetry.SetActive(false);
+        _telemetry.SetPeekTemperatures(ShowsTemperature);
     }
 
     protected override string Title => "SYSTEM PULSE";
@@ -41,7 +49,26 @@ internal sealed class SystemPulseForm : WidgetForm
         _telemetry.SetPeeking(state == RevealState.Peek);
     }
 
-    protected override Size GetLogicalPeekSize(bool horizontal) => horizontal ? new Size(344, 28) : new Size(54, 150);
+    private bool ShowsTemperature => (_settings.Peek & (PeekValues.CpuTemperature | PeekValues.GpuTemperature)) != 0;
+
+    internal void PeekValuesChanged()
+    {
+        _telemetry.SetPeekTemperatures(ShowsTemperature);
+        if (State == RevealState.Peek)
+        {
+            ContentSizeChanged();
+        }
+    }
+
+    // Load and temperature reserve their widest text so the peek does not resize every second.
+    protected override Size GetLogicalPeekSize(bool horizontal)
+    {
+        var items = PeekItems();
+        return horizontal
+            ? new Size((int)Math.Ceiling(2 * PeekPadding + PeekCharWidth * (items.Sum(item => item.Label.Length + item.Parts.Sum(part => 1 + (part.Widest ?? part.Text).Length))
+                + Math.Max(0, items.Count - 1) * PeekSeparator.Length)), 28)
+            : new Size(54, 18 + items.Sum(item => 18 + 15 * item.Parts.Count));
+    }
 
     protected override void CreateFonts()
     {
@@ -59,8 +86,13 @@ internal sealed class SystemPulseForm : WidgetForm
 
         BeginInvoke(new Action(() =>
         {
+            var previousPeek = GetLogicalPeekSize(IsHorizontal);
             _snapshot = snapshot;
-            if (State != RevealState.Hidden)
+            if (State == RevealState.Peek && GetLogicalPeekSize(IsHorizontal) != previousPeek)
+            {
+                ContentSizeChanged();
+            }
+            else if (State != RevealState.Hidden)
             {
                 Invalidate();
             }
@@ -120,20 +152,30 @@ internal sealed class SystemPulseForm : WidgetForm
         var textHeight = TextLineHeight(graphics, _peekFont, 0);
         if (IsHorizontal)
         {
-            var separator = " · ";
-            var width = items.Sum(item => MeasureText(graphics, $"{item.Label} ", _peekFont) + MeasureText(graphics, item.Value, _peekFont))
-                + (items.Count - 1) * MeasureText(graphics, separator, _peekFont);
-            var x = (Width - width) / 2f;
-            var y = (Height - textHeight) / 2f;
-            for (var i = 0; i < items.Count; i++)
+            var segments = new List<(string Text, Color Color, bool Stopwatch)>();
+            foreach (var item in items)
             {
-                if (i > 0)
+                if (segments.Count > 0)
                 {
-                    x = DrawPeekText(graphics, separator, Muted, x, y, textHeight);
+                    segments.Add((PeekSeparator, Muted, false));
                 }
 
-                x = DrawPeekText(graphics, $"{items[i].Label} ", Foreground, x, y, textHeight);
-                x = DrawPeekText(graphics, items[i].Value, items[i].Warning ? Warning : Ice, x, y, textHeight);
+                segments.Add(($"{item.Label} ", Foreground, item.Stopwatch));
+                segments.AddRange(item.Parts.Select((part, index) => (index == 0 ? part.Text : $" {part.Text}", part.Warning ? Warning : Ice, false)));
+            }
+
+            var x = (Width - segments.Sum(segment => MeasureText(graphics, segment.Text, _peekFont))) / 2f;
+            var y = (Height - textHeight) / 2f;
+            foreach (var segment in segments)
+            {
+                if (segment.Stopwatch)
+                {
+                    DrawStopwatch(graphics, x + MeasureText(graphics, segment.Text.TrimEnd(), _peekFont) / 2f, Height / 2f, segment.Color);
+                    x += MeasureText(graphics, segment.Text, _peekFont);
+                    continue;
+                }
+
+                x = DrawPeekText(graphics, segment.Text, segment.Color, x, y, textHeight);
             }
 
             return;
@@ -142,24 +184,109 @@ internal sealed class SystemPulseForm : WidgetForm
         var top = 12 * scale;
         foreach (var item in items)
         {
-            DrawPeekCentered(graphics, item.Label, Muted, top, textHeight);
-            DrawPeekCentered(graphics, item.Value, item.Warning ? Warning : Ice, top + 15 * scale, textHeight);
-            top += 33 * scale;
+            if (item.Stopwatch)
+            {
+                DrawStopwatch(graphics, Width / 2f, top + textHeight / 2f, Muted);
+            }
+            else
+            {
+                DrawPeekCentered(graphics, item.Label, Muted, top, textHeight);
+            }
+            foreach (var part in item.Parts)
+            {
+                top += 15 * scale;
+                DrawPeekCentered(graphics, part.Text, part.Warning ? Warning : Ice, top, textHeight);
+            }
+
+            top += 18 * scale;
         }
     }
 
-    private List<(string Label, string Value, bool Warning)> PeekItems()
+    private sealed record PeekPart(string Text, string? Widest = null, bool Warning = false);
+
+    // A stopwatch item draws an icon in place of its label; the label still sizes the peek.
+    private sealed record PeekItem(string Label, IReadOnlyList<PeekPart> Parts, bool Stopwatch = false);
+
+    private List<PeekItem> PeekItems()
     {
-        var systemDrive = (Environment.GetEnvironmentVariable("SystemDrive") ?? "C:").TrimEnd('\\');
-        var drive = _snapshot.Drives.FirstOrDefault(drive => drive.Name.Equals(systemDrive, StringComparison.OrdinalIgnoreCase))
-            ?? _snapshot.Drives.FirstOrDefault();
-        return
-        [
-            ("CPU", Percent(_snapshot.CpuPercent), false),
-            ("GPU", Percent(_snapshot.GpuPercent), false),
-            ("RAM", Percent(_snapshot.MemoryPercent), false),
-            (drive?.Name ?? systemDrive, drive is null ? "—" : $"{drive.FreeGb:0}G", drive?.FreePercent < 10)
-        ];
+        var peek = _settings.Peek;
+        var items = new List<PeekItem>();
+        AddLoad("CPU", peek.HasFlag(PeekValues.Cpu), _snapshot.CpuPercent, peek.HasFlag(PeekValues.CpuTemperature), _snapshot.CpuTemperatureC);
+        AddLoad("GPU", peek.HasFlag(PeekValues.Gpu), _snapshot.GpuPercent, peek.HasFlag(PeekValues.GpuTemperature), _snapshot.GpuTemperatureC);
+        if (peek.HasFlag(PeekValues.Memory))
+        {
+            items.Add(new PeekItem("RAM", [new PeekPart(Percent(_snapshot.MemoryPercent), "100%")]));
+        }
+
+        foreach (var (name, drive) in PeekDrives())
+        {
+            items.Add(new PeekItem(name, [new PeekPart(drive is null ? "—" : $"{drive.FreeGb:0}G", Warning: drive?.FreePercent < 10)]));
+        }
+
+        if (peek.HasFlag(PeekValues.Uptime))
+        {
+            items.Add(new PeekItem("UP", [new PeekPart($"{(int)_snapshot.Uptime.TotalDays}d"), new PeekPart($"{_snapshot.Uptime.Hours}h")], Stopwatch: true));
+        }
+
+        return items;
+
+        void AddLoad(string label, bool load, double percent, bool temperature, double? celsius)
+        {
+            var parts = new List<PeekPart>();
+            if (load)
+            {
+                parts.Add(new PeekPart(Percent(percent), "100%"));
+            }
+
+            if (temperature)
+            {
+                parts.Add(celsius is null ? new PeekPart("—") : new PeekPart($"{celsius:0}°", "100°"));
+            }
+
+            if (parts.Count > 0)
+            {
+                items.Add(new PeekItem(label, parts));
+            }
+        }
+    }
+
+    // A chosen drive that is missing is skipped, except before the first sample when no drive is known yet.
+    private IEnumerable<(string Name, DriveMetric? Drive)> PeekDrives()
+    {
+        if (_settings.PeekDrives is null)
+        {
+            var systemDrive = TelemetryService.SystemDrive;
+            var drive = _snapshot.Drives.FirstOrDefault(drive => drive.Name.Equals(systemDrive, StringComparison.OrdinalIgnoreCase))
+                ?? _snapshot.Drives.FirstOrDefault();
+            yield return (drive?.Name ?? systemDrive, drive);
+            yield break;
+        }
+
+        foreach (var name in _settings.PeekDrives)
+        {
+            var drive = _snapshot.Drives.FirstOrDefault(drive => drive.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (drive is not null || _snapshot.Drives.Count == 0)
+            {
+                yield return (name, drive);
+            }
+        }
+    }
+
+    private void DrawStopwatch(Graphics graphics, float centerX, float centerY, Color color)
+    {
+        var scale = DeviceDpi / 96f;
+        var radius = 4.6f * scale;
+        var dialY = centerY + scale;
+        var smoothing = graphics.SmoothingMode;
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var pen = new Pen(color, 1.25f * scale) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        graphics.DrawEllipse(pen, centerX - radius, dialY - radius, 2 * radius, 2 * radius);
+        graphics.DrawLine(pen, centerX, dialY - radius, centerX, dialY - radius - 1.6f * scale);
+        graphics.DrawLine(pen, centerX - 1.6f * scale, dialY - radius - 1.8f * scale, centerX + 1.6f * scale, dialY - radius - 1.8f * scale);
+        var side = radius * 0.72f;
+        graphics.DrawLine(pen, centerX + side, dialY - side, centerX + side + 1.3f * scale, dialY - side - 1.3f * scale);
+        graphics.DrawLine(pen, centerX, dialY, centerX + 1.8f * scale, dialY - 2.2f * scale);
+        graphics.SmoothingMode = smoothing;
     }
 
     private float DrawPeekText(Graphics graphics, string text, Color color, float x, float y, float height)

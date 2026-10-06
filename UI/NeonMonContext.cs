@@ -65,7 +65,7 @@ internal sealed class NeonMonContext : ApplicationContext
         {
             if (args.Button == MouseButtons.Left)
             {
-                SystemForm.ToggleOpen();
+                FirstEnabledForm?.ToggleOpen();
             }
         };
     }
@@ -75,8 +75,12 @@ internal sealed class NeonMonContext : ApplicationContext
 
     private WidgetForm[] Forms => [SystemForm, QuotaForm];
 
+    private WidgetForm? FirstEnabledForm => Forms.FirstOrDefault(form => form.Settings.Enabled);
+
     public void Start()
     {
+        _ = SystemForm.Handle;
+        _ = QuotaForm.Handle;
         QuotaForm.SetSnapshot(_quota.RefreshLocal());
         _quota.Start();
         ShowStrips();
@@ -93,6 +97,7 @@ internal sealed class NeonMonContext : ApplicationContext
         }
 
         _telemetry.SetBackgroundSampling(_bridge.IsRunning);
+        UpdateQuotaWork();
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
         try
@@ -128,20 +133,20 @@ internal sealed class NeonMonContext : ApplicationContext
         {
             if (!HideForFullscreen)
             {
-                SystemForm.SetRevealState(RevealState.Open);
+                FirstEnabledForm?.SetRevealState(RevealState.Open);
             }
         }));
     }
 
     private void ShowStrips(bool reopenPinned = false)
     {
-        SystemForm.Show();
-        if (_quotaSettings.Enabled)
+        foreach (var form in Forms.Where(form => form.Settings.Enabled))
         {
-            QuotaForm.Show();
-            ResolveSpacing(QuotaForm);
-            QuotaForm.AnimateToLayout();
+            form.Show();
         }
+
+        ResolveSpacing(QuotaForm);
+        QuotaForm.AnimateToLayout();
 
         if (!reopenPinned)
         {
@@ -171,7 +176,7 @@ internal sealed class NeonMonContext : ApplicationContext
     {
         if (!HideForFullscreen)
         {
-            if (!SystemForm.Visible)
+            if (!Forms.Any(form => form.Visible))
             {
                 ShowStrips(reopenPinned: true);
             }
@@ -312,6 +317,13 @@ internal sealed class NeonMonContext : ApplicationContext
         var keepOpen = new ToolStripMenuItem("Keep open") { Checked = target.Settings.KeepOpen };
         keepOpen.Click += (_, _) => target.SetKeepOpen(!target.Settings.KeepOpen);
         menu.Items.Add(keepOpen);
+        if (!target.Settings.Enabled)
+        {
+            foreach (ToolStripItem item in menu.Items)
+            {
+                item.Enabled = false;
+            }
+        }
 
         var fullscreenMenu = new ToolStripMenuItem("Over fullscreen apps");
         foreach (var behavior in Enum.GetValues<FullscreenBehavior>())
@@ -337,9 +349,14 @@ internal sealed class NeonMonContext : ApplicationContext
         AddCliItem(menu, QuotaProvider.Codex, "Open Codex CLI");
         menu.Items.Add("Copy Claude statusLine setting", null, (_, _) => CopyStatusLineSetting());
 
-        var quotaStrip = new ToolStripMenuItem("Quota pulse strip") { Checked = _quotaSettings.Enabled };
-        quotaStrip.Click += (_, _) => SetQuotaEnabled(!_quotaSettings.Enabled);
-        menu.Items.Add(quotaStrip);
+        var pulses = new ToolStripMenuItem("Pulses");
+        foreach (var (form, name) in new (WidgetForm, string)[] { (SystemForm, "System pulse"), (QuotaForm, "Quota pulse") })
+        {
+            var item = new ToolStripMenuItem(name) { Checked = form.Settings.Enabled };
+            item.Click += (_, _) => SetPulseEnabled(form, !form.Settings.Enabled);
+            pulses.DropDownItems.Add(item);
+        }
+        menu.Items.Add(pulses);
 
         var endpoint = new ToolStripMenuItem("Claude: live endpoint fallback")
         {
@@ -382,28 +399,29 @@ internal sealed class NeonMonContext : ApplicationContext
 
         _settings.HtmlBridgeEnabled = !_settings.HtmlBridgeEnabled;
         _telemetry.SetBackgroundSampling(_bridge.IsRunning);
+        UpdateQuotaWork();
         SaveSettings();
     }
 
-    private void SetQuotaEnabled(bool enabled)
+    private void SetPulseEnabled(WidgetForm form, bool enabled)
     {
-        _quotaSettings.Enabled = enabled;
+        form.Settings.Enabled = enabled;
         SaveSettings();
-        if (enabled)
+        UpdateQuotaWork();
+        if (!enabled)
         {
-            if (!HideForFullscreen)
-            {
-                QuotaForm.Show();
-                ResolveSpacing(QuotaForm);
-                QuotaForm.AnimateToLayout();
-            }
+            form.SetRevealState(RevealState.Hidden);
+            form.Hide();
         }
-        else
+        else if (!HideForFullscreen)
         {
-            QuotaForm.SetRevealState(RevealState.Hidden);
-            QuotaForm.Hide();
+            form.Show();
+            ResolveSpacing(QuotaForm);
+            QuotaForm.AnimateToLayout();
         }
     }
+
+    private void UpdateQuotaWork() => _quota.SetPaused(!_quotaSettings.Enabled && !_bridge.IsRunning);
 
     private void AddCliItem(ContextMenuStrip menu, QuotaProvider provider, string text)
     {

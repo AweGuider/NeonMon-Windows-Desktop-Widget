@@ -19,6 +19,7 @@ internal sealed class QuotaService : IDisposable
     private readonly SemaphoreSlim _wake = new(0, 1);
     private Task? _loop;
     private volatile bool _active;
+    private volatile bool _paused;
     private ProviderQuota? _endpointQuota;
     private ProviderQuota? _appServerQuota;
     private DateTimeOffset _nextAppServerRead;
@@ -58,6 +59,15 @@ internal sealed class QuotaService : IDisposable
         }
 
         Wake();
+    }
+
+    public void SetPaused(bool paused)
+    {
+        _paused = paused;
+        if (!paused)
+        {
+            Wake();
+        }
     }
 
     public QuotaSnapshot RefreshLocal()
@@ -122,6 +132,19 @@ internal sealed class QuotaService : IDisposable
     {
         while (!_cancellation.IsCancellationRequested)
         {
+            if (_paused)
+            {
+                try
+                {
+                    await _wake.WaitAsync(Timeout.Infinite, _cancellation.Token).ConfigureAwait(false);
+                    continue;
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+
             try
             {
                 if (DateTimeOffset.Now >= _nextAppServerRead)

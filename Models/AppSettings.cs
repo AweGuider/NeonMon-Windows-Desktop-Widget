@@ -2,6 +2,7 @@ namespace NeonMon.Models;
 
 internal class StripSettings
 {
+    public bool Enabled { get; set; } = true;
     public WidgetSize Size { get; set; } = WidgetSize.Large;
     public DockEdge DockEdge { get; set; } = DockEdge.Top;
     public double DockOffset { get; set; } = 0.5;
@@ -21,7 +22,6 @@ internal sealed class AppSettings : StripSettings
 
 internal sealed class QuotaSettings : StripSettings
 {
-    public bool Enabled { get; set; } = true;
     public bool ClaudeEndpointFallback { get; set; }
     public QuotaDisplay Display { get; set; } = QuotaDisplay.Remaining;
     public string ClaudeCliDirectory { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

@@ -10,6 +10,7 @@ internal sealed record TelemetrySnapshot
     {
         CapturedAt = new DateTimeOffset(2026, 10, 5, 12, 0, 0, TimeSpan.Zero),
         Uptime = new TimeSpan(2, 9, 27, 12),
+        WindowsUptime = new TimeSpan(6, 3, 12, 40),
         CpuPercent = 12,
         GpuPercent = 19,
         GpuTemperatureC = 47,
@@ -26,6 +27,7 @@ internal sealed record TelemetrySnapshot
 
     public DateTimeOffset CapturedAt { get; init; } = DateTimeOffset.Now;
     public TimeSpan Uptime { get; init; }
+    public TimeSpan WindowsUptime { get; init; }
     public double CpuPercent { get; init; }
     public double? CpuTemperatureC { get; init; }
     public double GpuPercent { get; init; }

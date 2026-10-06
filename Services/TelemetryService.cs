@@ -63,6 +63,16 @@ internal sealed class TelemetryService : IDisposable
         }
     }
 
+    // LastWakeTime uses the same interrupt-time clock as TickCount64; Fast Startup "boots" count as wakes.
+    private static TimeSpan SinceLastWake(TimeSpan sinceBoot)
+    {
+        const int LastWakeTime = 14;
+        return NativeMethods.CallNtPowerInformation(LastWakeTime, 0, 0, out var wake, sizeof(ulong)) == 0
+            && wake > 0 && (long)wake < sinceBoot.Ticks
+                ? sinceBoot - TimeSpan.FromTicks((long)wake)
+                : sinceBoot;
+    }
+
     private async Task SampleLoopAsync()
     {
         while (!_cancellation.IsCancellationRequested)
@@ -117,7 +127,8 @@ internal sealed class TelemetryService : IDisposable
         return new TelemetrySnapshot
         {
             CapturedAt = DateTimeOffset.Now,
-            Uptime = TimeSpan.FromMilliseconds(Environment.TickCount64),
+            Uptime = SinceLastWake(TimeSpan.FromMilliseconds(Environment.TickCount64)),
+            WindowsUptime = TimeSpan.FromMilliseconds(Environment.TickCount64),
             CpuPercent = _cpu.Read(),
             CpuTemperatureC = msi.CpuTemperatureC,
             GpuPercent = gpu.Utilization,

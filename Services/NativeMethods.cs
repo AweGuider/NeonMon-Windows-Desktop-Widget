@@ -34,4 +34,7 @@ internal static class NativeMethods
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GlobalMemoryStatusEx([In, Out] MemoryStatusEx buffer);
+
+    [DllImport("powrprof.dll")]
+    internal static extern uint CallNtPowerInformation(int informationLevel, nint inputBuffer, uint inputBufferLength, out ulong outputBuffer, uint outputBufferLength);
 }

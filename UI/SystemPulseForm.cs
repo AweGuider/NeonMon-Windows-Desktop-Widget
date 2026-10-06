@@ -8,6 +8,7 @@ internal sealed class SystemPulseForm : WidgetForm
 {
     private readonly TelemetryService _telemetry;
     private readonly Dictionary<string, Rectangle> _driveHitAreas = [];
+    private Rectangle _uptimeArea;
     private TelemetrySnapshot _snapshot = TelemetrySnapshot.Empty;
 
     public SystemPulseForm(AppSettings settings, Action saveSettings, TelemetryService telemetry)
@@ -76,7 +77,9 @@ internal sealed class SystemPulseForm : WidgetForm
             }
         }
 
-        return null;
+        return _uptimeArea.Contains(point)
+            ? $"Since power-on or wake · last full Windows boot {(int)_snapshot.WindowsUptime.TotalDays}d {_snapshot.WindowsUptime.Hours:00}h ago"
+            : null;
     }
 
     private void OpenDrive(string driveName)
@@ -182,6 +185,7 @@ internal sealed class SystemPulseForm : WidgetForm
         var labelHeight = TextLineHeight(graphics, LabelFont, 2 * scale);
         var valueFont = compact ? ValueFont : UptimeFont;
         var valueHeight = TextLineHeight(graphics, valueFont, 2 * scale);
+        _uptimeArea = Rectangle.Ceiling(area);
 
         DrawText(graphics, "UPTIME", LabelFont, Muted, new RectangleF(area.X, area.Y, area.Width, labelHeight));
         var value = compact

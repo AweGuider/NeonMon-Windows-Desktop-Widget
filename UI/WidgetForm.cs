@@ -215,7 +215,20 @@ internal abstract class WidgetForm : Form
 
         using var bitmap = new Bitmap(ClientSize.Width, ClientSize.Height);
         DrawToBitmap(bitmap, ClientRectangle);
-        bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+
+        // DrawToBitmap ignores the window region, so clip to it here or the rounded corners render square.
+        using var clipped = new Bitmap(bitmap.Width, bitmap.Height);
+        using (var graphics = Graphics.FromImage(clipped))
+        {
+            if (Region is not null)
+            {
+                graphics.Clip = Region;
+            }
+
+            graphics.DrawImageUnscaled(bitmap, 0, 0);
+        }
+
+        clipped.Save(path, System.Drawing.Imaging.ImageFormat.Png);
     }
 
     internal void PrepareExit() => _exiting = true;

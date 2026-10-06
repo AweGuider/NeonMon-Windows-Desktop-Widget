@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <None Include="tools\neonmon-statusline.js" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Assets\*.png" />
   </ItemGroup>
 
   <ItemGroup>

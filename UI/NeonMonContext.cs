@@ -469,8 +469,54 @@ internal sealed class NeonMonContext : ApplicationContext
         [
             new SettingsPage("General", general),
             new SettingsPage("System pulse", StripRows(SystemForm)),
-            new SettingsPage("Quota pulse", quota)
+            new SettingsPage("Quota pulse", quota),
+            new SettingsPage("Support", SupportRows())
         ];
+    }
+
+    private static readonly Image CoffeeIcon = LoadAsset("coffee.png");
+    private static readonly Image SmileyIcon = LoadAsset("smiley.png");
+
+    private static Image LoadAsset(string name)
+    {
+        using var stream = typeof(NeonMonContext).Assembly.GetManifestResourceStream($"NeonMon.Assets.{name}")!;
+        return Image.FromStream(new MemoryStream(ReadAll(stream)));
+    }
+
+    private static byte[] ReadAll(Stream stream)
+    {
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
+    }
+
+    private const string RepositoryUrl = "https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget";
+
+    private List<SettingsRow> SupportRows()
+    {
+        var version = Application.ProductVersion.Split('+')[0];
+        return
+        [
+            new SectionRow("Support NeonMon"),
+            new ActionRow("Ko-fi", () => "ko-fi.com/awedev", "Buy a cappuccino", () => OpenUrl("https://ko-fi.com/awedev"),
+                "NeonMon stays free. Support is optional and helps future releases", CoffeeIcon, SmileyIcon),
+            new SectionRow("Project"),
+            new ActionRow("Source code", () => "GitHub", "Open", () => OpenUrl(RepositoryUrl)),
+            new ActionRow("Report an issue", () => "GitHub issues", "Open", () => OpenUrl($"{RepositoryUrl}/issues/new/choose")),
+            new ActionRow("Version", () => version, "Release notes", () => OpenUrl($"{RepositoryUrl}/releases"))
+        ];
+    }
+
+    private void OpenUrl(string url)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch
+        {
+            ShowNotice("Could not open the browser.");
+        }
     }
 
     private List<SettingsRow> StripRows(WidgetForm form)

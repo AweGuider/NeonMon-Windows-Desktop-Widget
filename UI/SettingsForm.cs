@@ -15,7 +15,8 @@ internal sealed record ToggleRow(string Label, Func<bool> Get, Action<bool> Set,
 internal sealed record ChoiceRow(string Label, IReadOnlyList<string> Options, Func<int> Get, Action<int> Set, string? Hint = null)
     : SettingsRow(Label, Hint);
 
-internal sealed record ActionRow(string Label, Func<string> Value, string Button, Action Click, string? Hint = null) : SettingsRow(Label, Hint);
+internal sealed record ActionRow(string Label, Func<string> Value, string Button, Action Click, string? Hint = null,
+    Image? ButtonIcon = null, Image? HintIcon = null) : SettingsRow(Label, Hint);
 
 internal sealed class SettingsForm : Form
 {
@@ -166,8 +167,14 @@ internal sealed class SettingsForm : Form
         DrawText(graphics, row.Label, _labelFont, Foreground, line, StringAlignment.Center);
         if (row.Hint is not null)
         {
-            DrawText(graphics, row.Hint, _hintFont, Muted,
-                new RectangleF(left, y + Px(RowHeight) - Px(6), right - left, Px(HintHeight)), StringAlignment.Near);
+            var hintTop = y + Px(RowHeight) - Px(6);
+            DrawText(graphics, row.Hint, _hintFont, Muted, new RectangleF(left, hintTop, right - left, Px(HintHeight)), StringAlignment.Near);
+            if (row is ActionRow { HintIcon: { } hintIcon })
+            {
+                var size = Px(13);
+                var x = left + MeasureText(graphics, row.Hint, _hintFont) + Px(5);
+                DrawIcon(graphics, hintIcon, new RectangleF(x, hintTop + (Px(HintHeight) - size) / 2f - Px(1), size, size));
+            }
         }
 
         var centerY = y + Px(RowHeight) / 2f;
@@ -234,7 +241,9 @@ internal sealed class SettingsForm : Form
     private void DrawAction(Graphics graphics, ActionRow action, float right, float centerY)
     {
         var height = Px(22);
-        var buttonWidth = MeasureText(graphics, action.Button, _hintFont) + Px(20);
+        var iconSize = Px(15);
+        var iconSpace = action.ButtonIcon is null ? 0 : iconSize + Px(5);
+        var buttonWidth = MeasureText(graphics, action.Button, _hintFont) + iconSpace + Px(20);
         var button = new RectangleF(right - buttonWidth, centerY - height / 2f, buttonWidth, height);
         using (var path = RoundedRectangle(button, Px(6)))
         using (var border = new Pen(Color.FromArgb(110, 75, 226, 246)))
@@ -242,12 +251,26 @@ internal sealed class SettingsForm : Form
             graphics.DrawPath(border, path);
         }
 
-        DrawText(graphics, action.Button, _hintFont, Ice, button, StringAlignment.Center, centered: true);
+        if (action.ButtonIcon is not null)
+        {
+            DrawIcon(graphics, action.ButtonIcon, new RectangleF(button.X + Px(10), centerY - iconSize / 2f, iconSize, iconSize));
+        }
+
+        DrawText(graphics, action.Button, _hintFont, Ice, new RectangleF(button.X + iconSpace, button.Y, button.Width - iconSpace, height),
+            StringAlignment.Center, centered: true);
         _hitAreas.Add((Rectangle.Round(button), action.Click));
 
         var valueWidth = Px(210);
         DrawText(graphics, action.Value(), _valueFont, Foreground,
             new RectangleF(button.X - Px(8) - valueWidth, button.Y, valueWidth, height), StringAlignment.Center, alignRight: true);
+    }
+
+    private static void DrawIcon(Graphics graphics, Image icon, RectangleF bounds)
+    {
+        var previous = graphics.InterpolationMode;
+        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        graphics.DrawImage(icon, bounds);
+        graphics.InterpolationMode = previous;
     }
 
     private static float MeasureText(Graphics graphics, string text, Font font) =>

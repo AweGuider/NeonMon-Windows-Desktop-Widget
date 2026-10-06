@@ -14,6 +14,7 @@ internal sealed class TelemetryService : IDisposable
     private readonly Task _loop;
     private volatile bool _active;
     private volatile bool _background;
+    private volatile bool _peeking;
     private int _topProcessCountdown;
     private int _eventCountdown;
     private string _topProcess = "Sampling";
@@ -38,6 +39,16 @@ internal sealed class TelemetryService : IDisposable
         if (activated)
         {
             _topProcessCountdown = 0;
+            Wake();
+        }
+    }
+
+    public void SetPeeking(bool peeking)
+    {
+        var started = peeking && !_peeking;
+        _peeking = peeking;
+        if (started)
+        {
             Wake();
         }
     }
@@ -77,7 +88,7 @@ internal sealed class TelemetryService : IDisposable
     {
         while (!_cancellation.IsCancellationRequested)
         {
-            if (_active || _background)
+            if (_active || _peeking || _background)
             {
                 try
                 {
@@ -92,7 +103,7 @@ internal sealed class TelemetryService : IDisposable
 
             try
             {
-                var delay = _active ? 1000 : _background ? 5000 : Timeout.Infinite;
+                var delay = _active || _peeking ? 1000 : _background ? 5000 : Timeout.Infinite;
                 await _wake.WaitAsync(delay, _cancellation.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)

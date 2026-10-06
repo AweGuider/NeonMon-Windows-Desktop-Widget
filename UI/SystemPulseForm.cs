@@ -10,6 +10,7 @@ internal sealed class SystemPulseForm : WidgetForm
     private readonly Dictionary<string, Rectangle> _driveHitAreas = [];
     private Rectangle _uptimeArea;
     private TelemetrySnapshot _snapshot = TelemetrySnapshot.Empty;
+    private Font _peekFont = null!;
 
     public SystemPulseForm(AppSettings settings, Action saveSettings, TelemetryService telemetry)
         : base(settings, saveSettings)
@@ -34,7 +35,20 @@ internal sealed class SystemPulseForm : WidgetForm
         _ => new Size(780, 190)
     };
 
-    protected override void OnRevealStateChanged(RevealState state) => _telemetry.SetActive(state == RevealState.Open);
+    protected override void OnRevealStateChanged(RevealState state)
+    {
+        _telemetry.SetActive(state == RevealState.Open);
+        _telemetry.SetPeeking(state == RevealState.Peek);
+    }
+
+    protected override Size GetLogicalPeekSize(bool horizontal) => horizontal ? new Size(344, 28) : new Size(54, 150);
+
+    protected override void CreateFonts()
+    {
+        base.CreateFonts();
+        _peekFont?.Dispose();
+        _peekFont = CreateFont("Consolas", 10.5f, FontStyle.Regular);
+    }
 
     private void HandleSnapshot(TelemetrySnapshot snapshot)
     {
@@ -46,7 +60,7 @@ internal sealed class SystemPulseForm : WidgetForm
         BeginInvoke(new Action(() =>
         {
             _snapshot = snapshot;
-            if (State == RevealState.Open)
+            if (State != RevealState.Hidden)
             {
                 Invalidate();
             }
@@ -101,16 +115,71 @@ internal sealed class SystemPulseForm : WidgetForm
     protected override void DrawPeek(Graphics graphics)
     {
         DrawPeekOutline(graphics);
+        var scale = DeviceDpi / 96f;
+        var items = PeekItems();
+        var textHeight = TextLineHeight(graphics, _peekFont, 0);
+        if (IsHorizontal)
+        {
+            var separator = " · ";
+            var width = items.Sum(item => MeasureText(graphics, $"{item.Label} ", _peekFont) + MeasureText(graphics, item.Value, _peekFont))
+                + (items.Count - 1) * MeasureText(graphics, separator, _peekFont);
+            var x = (Width - width) / 2f;
+            var y = (Height - textHeight) / 2f;
+            for (var i = 0; i < items.Count; i++)
+            {
+                if (i > 0)
+                {
+                    x = DrawPeekText(graphics, separator, Muted, x, y, textHeight);
+                }
 
-        using var glow = new Pen(Color.FromArgb(95, Cyan), 4f);
-        using var pulse = new Pen(Cyan, 1.4f);
-        var centerX = Width / 2f;
-        var centerY = Height / 2f;
-        var points = IsHorizontal
-            ? new[] { new PointF(centerX - 16, centerY), new PointF(centerX - 7, centerY), new PointF(centerX - 3, centerY - 6), new PointF(centerX + 2, centerY + 6), new PointF(centerX + 7, centerY), new PointF(centerX + 16, centerY) }
-            : new[] { new PointF(centerX, centerY - 16), new PointF(centerX, centerY - 7), new PointF(centerX - 6, centerY - 3), new PointF(centerX + 6, centerY + 2), new PointF(centerX, centerY + 7), new PointF(centerX, centerY + 16) };
-        graphics.DrawLines(glow, points);
-        graphics.DrawLines(pulse, points);
+                x = DrawPeekText(graphics, $"{items[i].Label} ", Foreground, x, y, textHeight);
+                x = DrawPeekText(graphics, items[i].Value, items[i].Warning ? Warning : Ice, x, y, textHeight);
+            }
+
+            return;
+        }
+
+        var top = 12 * scale;
+        foreach (var item in items)
+        {
+            DrawPeekCentered(graphics, item.Label, Muted, top, textHeight);
+            DrawPeekCentered(graphics, item.Value, item.Warning ? Warning : Ice, top + 15 * scale, textHeight);
+            top += 33 * scale;
+        }
+    }
+
+    private List<(string Label, string Value, bool Warning)> PeekItems()
+    {
+        var systemDrive = (Environment.GetEnvironmentVariable("SystemDrive") ?? "C:").TrimEnd('\\');
+        var drive = _snapshot.Drives.FirstOrDefault(drive => drive.Name.Equals(systemDrive, StringComparison.OrdinalIgnoreCase))
+            ?? _snapshot.Drives.FirstOrDefault();
+        return
+        [
+            ("CPU", Percent(_snapshot.CpuPercent), false),
+            ("GPU", Percent(_snapshot.GpuPercent), false),
+            ("RAM", Percent(_snapshot.MemoryPercent), false),
+            (drive?.Name ?? systemDrive, drive is null ? "—" : $"{drive.FreeGb:0}G", drive?.FreePercent < 10)
+        ];
+    }
+
+    private float DrawPeekText(Graphics graphics, string text, Color color, float x, float y, float height)
+    {
+        var width = MeasureText(graphics, text, _peekFont);
+        DrawText(graphics, text, _peekFont, color, new RectangleF(x, y, width + 2, height));
+        return x + width;
+    }
+
+    private void DrawPeekCentered(Graphics graphics, string text, Color color, float y, float height)
+    {
+        var width = MeasureText(graphics, text, _peekFont);
+        DrawText(graphics, text, _peekFont, color, new RectangleF((Width - width) / 2f, y, width + 2, height));
+    }
+
+    private static float MeasureText(Graphics graphics, string text, Font font)
+    {
+        using var format = new StringFormat(StringFormat.GenericTypographic);
+        format.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+        return graphics.MeasureString(text, font, PointF.Empty, format).Width;
     }
 
     protected override void DrawBody(Graphics graphics)
@@ -284,6 +353,7 @@ internal sealed class SystemPulseForm : WidgetForm
         if (disposing)
         {
             _telemetry.SnapshotUpdated -= HandleSnapshot;
+            _peekFont?.Dispose();
         }
 
         base.Dispose(disposing);

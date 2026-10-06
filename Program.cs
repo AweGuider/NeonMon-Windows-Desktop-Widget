@@ -11,7 +11,7 @@ internal static class Program
     private const string InstanceMutexName = @"Local\NeonMon.Instance";
     private const string OpenSignalName = @"Local\NeonMon.Open";
     private const string ExitSignalName = @"Local\NeonMon.Exit";
-    private static readonly string[] ToolArguments = ["--render-preview", "--render-peek-preview", "--self-test", "--dump-quota", "--export-icon"];
+    private static readonly string[] ToolArguments = ["--render-settings", "--render-preview", "--render-peek-preview", "--self-test", "--dump-quota", "--export-icon"];
 
     [STAThread]
     private static int Main(string[] args)
@@ -53,13 +53,22 @@ internal static class Program
         using var openSignalLease = openSignal;
         using var exitSignalLease = exitSignal;
         using var settingsStore = new SettingsStore();
-        var settings = settingsStore.Load();
+        var useSample = args.Contains("--sample", StringComparer.OrdinalIgnoreCase);
+        var settingsPreviewIndex = Array.FindIndex(args, argument => argument.Equals("--render-settings", StringComparison.OrdinalIgnoreCase));
+        var settings = settingsPreviewIndex >= 0 && useSample ? SampleSettings() : settingsStore.Load();
         using var telemetry = new TelemetryService();
         using var quota = new QuotaService(() => settings.Quota?.ClaudeEndpointFallback == true);
         using var bridge = new MetricsBridge(() => telemetry.Latest, () => quota.Latest, () => settings.HtmlBridgeAllowedOrigins);
         using var context = new NeonMonContext(settings, settingsStore, telemetry, quota, bridge);
 
-        var useSample = args.Contains("--sample", StringComparer.OrdinalIgnoreCase);
+        if (settingsPreviewIndex >= 0 && settingsPreviewIndex + 1 < args.Length)
+        {
+            var pageName = settingsPreviewIndex + 2 < args.Length ? args[settingsPreviewIndex + 2] : "General";
+            var page = Array.FindIndex(["General", "System", "Quota", "Support"], name => name.Equals(pageName, StringComparison.OrdinalIgnoreCase));
+            context.SaveSettingsPreview(args[settingsPreviewIndex + 1], Math.Max(0, page), useSample ? "updated 12 min ago" : null);
+            return 0;
+        }
+
         WidgetForm previewTarget = string.Equals(ArgumentValue(args, "--strip"), "quota", StringComparison.OrdinalIgnoreCase)
             ? context.QuotaForm
             : context.SystemForm;
@@ -161,6 +170,17 @@ internal static class Program
         {
         }
     }
+
+    private static AppSettings SampleSettings() => new()
+    {
+        FollowMouse = true,
+        Quota = new QuotaSettings
+        {
+            FollowMouse = true,
+            ClaudeCliDirectory = @"C:\Users\you\Projects",
+            CodexCliDirectory = @"C:\Users\you"
+        }
+    };
 
     private static void PreparePreview(NeonMonContext context, TelemetryService telemetry, QuotaService quota, bool useSample)
     {

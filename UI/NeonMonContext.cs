@@ -19,6 +19,7 @@ internal sealed class NeonMonContext : ApplicationContext
     private readonly ContextMenuStrip _trayMenu;
     private readonly DarkMenuRenderer _darkMenuRenderer = new();
     private SettingsForm? _settingsForm;
+    private string? _sampleStatusLine;
     private readonly bool _quotaSettingsCreated;
     private FullscreenWatcher? _fullscreenWatcher;
     private ForegroundWatcher? _foregroundWatcher;
@@ -433,6 +434,13 @@ internal sealed class NeonMonContext : ApplicationContext
         _settingsForm.Activate();
     }
 
+    internal void SaveSettingsPreview(string path, int page, string? sampleStatusLine)
+    {
+        _sampleStatusLine = sampleStatusLine;
+        using var form = new SettingsForm(BuildSettingsPages, _trayIcon);
+        form.SavePreview(path, page);
+    }
+
     private IReadOnlyList<SettingsPage> BuildSettingsPages()
     {
         var general = new List<SettingsRow> { new SectionRow("Pulses") };
@@ -555,8 +563,13 @@ internal sealed class NeonMonContext : ApplicationContext
         return rows;
     }
 
-    private static string StatusLineStatus()
+    private string StatusLineStatus()
     {
+        if (_sampleStatusLine is not null)
+        {
+            return _sampleStatusLine;
+        }
+
         var file = new FileInfo(ClaudeStatuslineReader.FilePath);
         if (!file.Exists)
         {

@@ -58,6 +58,19 @@ internal sealed class SettingsForm : Form
         ClientSize = new Size(Px(LogicalWidth), Px(RequiredHeight()));
     }
 
+    internal void SavePreview(string path, int page)
+    {
+        _pageIndex = page;
+        using var bitmap = new Bitmap(ClientSize.Width, ClientSize.Height);
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            graphics.Clear(Background);
+            OnPaint(new PaintEventArgs(graphics, ClientRectangle));
+        }
+
+        bitmap.Save(path);
+    }
+
     private float DpiScale => DeviceDpi / 96f;
 
     private int Px(float logical) => (int)Math.Round(logical * DpiScale);

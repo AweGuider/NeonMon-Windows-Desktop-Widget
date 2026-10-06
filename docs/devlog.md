@@ -79,3 +79,14 @@ Every pulse can now be turned off. A pulse that is off is hidden and does no bac
 ![Settings window and the Quota pulse menu in the Windows and dark styles](images/history-settings-window.png)
 
 Two feature requests from the same contributor shape v0.4.0.
+
+## October 6, 2026: more at a glance (v0.4.0)
+
+Two feature requests asked the same thing: say more before the strip is opened.
+
+- **Hidden Quota tab:** it showed only the tighter of the 5-hour and weekly limits, so you could not tell which one you were looking at, and it switched between them. It now shows both on two lines: weekly on the line nearest the screen edge, outlined in amber like the weekly chip in the peek, and 5-hour inside it. The Claude and Codex circles grew to fill the taller tab, and both hidden tabs got a little longer to match. One line is still available.
+- **System pulse peek:** hovering showed only a pulse icon. It now shows CPU, GPU, and memory load and free space on the system drive. Telemetry samples only while the peek is visible and skips the expensive process scan; it costs about 0.9% of one core for the few seconds a peek is open.
+
+![Hidden tabs and the System pulse peek before (top) and after (bottom)](images/history-hidden-and-peek.png)
+
+Settings also got a Support page with the Ko-fi, source, issue, and release links.

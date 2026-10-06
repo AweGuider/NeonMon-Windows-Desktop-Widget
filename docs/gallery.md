@@ -1,6 +1,6 @@
 # Gallery
 
-All screenshots are rendered by NeonMon itself (`NeonMon.exe --render-preview <file> <size> --strip <system|quota> --state <Hidden|Peek|Open> --sample`) at 125% scaling with fixed sample data, so they are reproducible and contain no live system data.
+All screenshots are rendered by NeonMon itself (`NeonMon.exe --render-preview <file> <size> --strip <system|quota> --state <Hidden|Peek|Open> --sample`, and `--render-settings <file> <General|System|Quota|Support> --sample` for the Settings window) at 125% scaling with fixed sample data, so they are reproducible and contain no live system data.
 
 [Back to the README](../README.md)
 
@@ -36,12 +36,20 @@ Claude Code is listed first and Codex second. Values count down from 100% remain
 
 ## Peek
 
-Hovering over a tab shows the headline numbers without opening the panel. Quota pulse shows each provider's 5-hour value, plus the weekly value on an amber chip when the weekly quota is the lower of the two.
+Hovering over a tab shows the headline numbers without opening the panel. Quota pulse shows each provider's 5-hour value, plus the weekly value on an amber chip when the weekly quota is the lower of the two. System pulse shows CPU, GPU, and memory load and free space on the system drive, which turns amber when the drive is nearly full.
 
 ![Quota pulse peek](images/quota-peek.png) &nbsp; ![System pulse peek](images/system-peek.png)
 
 ## Hidden tabs
 
-The hidden state is a small tab hanging off the screen edge: a dark body with a bright bar, inside a light outer ring. The quota tab splits into a Claude segment and a Codex segment, each filled to its remaining quota, with brand-colored caps at the ends.
+The hidden state is a small tab hanging off the screen edge: a dark body with bright bars, inside a light outer ring. The quota tab shows two lines, split into a Claude half and a Codex half with brand-colored circles at the ends: the weekly limit on the line nearest the screen edge, outlined in amber, and the 5-hour limit inside it. **Hidden tab → One line** in the Quota pulse menu switches back to a single line showing whichever limit is tighter.
+
+![System pulse and Quota pulse hidden tabs, docked to the bottom edge](images/hidden-tabs.png)
 
 ![Hidden tabs before and after the redesign, on four backgrounds](images/hidden-strips-before-after.png)
+
+## Settings
+
+**Settings…** in any menu opens a window with a page for each pulse, general options, and support links. The right-click menus can also switch to a dark style there.
+
+![Settings window, Quota pulse page](images/settings.png)

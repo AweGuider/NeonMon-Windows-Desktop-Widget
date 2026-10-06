@@ -36,7 +36,7 @@ Claude Code is listed first and Codex second. Values count down from 100% remain
 
 ## Peek
 
-Hovering over a tab shows the headline numbers without opening the panel. Quota pulse shows each provider's 5-hour value, plus the weekly value on an amber chip when the weekly quota is the lower of the two. System pulse shows CPU, GPU, and memory load and free space on the system drive, which turns amber when the drive is nearly full.
+Hovering over a tab shows the headline numbers without opening the panel. Quota pulse shows each provider's 5-hour value, plus the weekly value on an amber chip when the weekly quota is the lower of the two. System pulse shows CPU, GPU, and memory load and free space on the system drive by default; a drive turns amber when it is nearly full. **Settings → System pulse → Peek** picks the values, including temperatures, other drives, and uptime.
 
 ![Quota pulse peek](images/quota-peek.png) &nbsp; ![System pulse peek](images/system-peek.png)
 

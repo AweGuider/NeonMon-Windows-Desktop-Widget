@@ -90,3 +90,11 @@ Two feature requests asked the same thing: say more before the strip is opened.
 ![Hidden tabs and the System pulse peek before (top) and after (bottom)](images/history-hidden-and-peek.png)
 
 Settings also got a Support page with the Ko-fi, source, issue, and release links.
+
+## October 7, 2026: your peek (v0.4.1)
+
+The System pulse peek from v0.4.0 showed a fixed set of values. **Settings → System pulse → Peek** now picks what it shows: CPU and GPU load and temperature, memory, any fixed drive, and uptime, marked with a small stopwatch as suggested in the feature request. A temperature joins its load value (`CPU 12% 54°`), and the peek grows to fit whatever is chosen. Temperatures are read only while one is shown.
+
+![Settings with the Peek section, and the peek it produces in both directions](images/history-peek-values.png)
+
+Two smaller fixes came from daily use. The two-line Quota tab left almost no dark space between its bars and the light ring, so it grew from 13 to 17 px thick. And rendered screenshots now keep the rounded corners the app has on screen, instead of square ones, so the images in this repo match what you see.

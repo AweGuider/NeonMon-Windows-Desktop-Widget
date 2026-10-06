@@ -47,6 +47,7 @@ More screenshots are in the [gallery](docs/gallery.md), and the [devlog](docs/de
 - **Multi-monitor:** put each strip on any monitor, dock it to any edge, and drag it along that edge. **Follow mouse** moves a hidden strip to whichever monitor the pointer is on. Text and layout scale correctly across monitors with different scaling.
 - **Readable anywhere:** the hidden tab pairs a dark body with a light ring, so it stays visible on white pages, bright video, and dark fullscreen video alike.
 - **Three layouts:** small, medium, and large for each strip.
+- **Your peek:** choose what System pulse shows on hover: load, temperatures, memory, any drive, and uptime.
 - **Settings window:** every option grouped by pulse, and either pulse can be turned off if you only want one.
 - **No paid API usage:** Quota pulse never calls a model and never uses API keys (see below).
 - **Optional local JSON bridge** for your own dashboards.
@@ -110,7 +111,7 @@ The bridge is disabled by default, binds only to `127.0.0.1`, and accepts no com
 
 ## Potential future features
 
-- Selectable metrics and warning thresholds.
+- Warning thresholds.
 - History graphs and lightweight data export.
 - Native embeddable HTML component rather than JSON only.
 - Start-with-Windows option and packaged installer.

@@ -347,6 +347,8 @@ internal sealed class NeonMonContext : ApplicationContext
 
         AddCliItem(menu, QuotaProvider.Claude, "Open Claude CLI");
         AddCliItem(menu, QuotaProvider.Codex, "Open Codex CLI");
+        AddCliFolderItem(menu, QuotaProvider.Claude);
+        AddCliFolderItem(menu, QuotaProvider.Codex);
         menu.Items.Add("Copy Claude statusLine setting", null, (_, _) => CopyStatusLineSetting());
 
         var pulses = new ToolStripMenuItem("Pulses");
@@ -435,6 +437,46 @@ internal sealed class NeonMonContext : ApplicationContext
     private void RefreshCliAvailability() =>
         QuotaForm.SetCliAvailability(CliCommand(QuotaProvider.Claude) is not null, CliCommand(QuotaProvider.Codex) is not null);
 
+    private string CliDirectory(QuotaProvider provider) =>
+        provider == QuotaProvider.Claude ? _quotaSettings.ClaudeCliDirectory : _quotaSettings.CodexCliDirectory;
+
+    private void AddCliFolderItem(ContextMenuStrip menu, QuotaProvider provider)
+    {
+        var name = provider == QuotaProvider.Claude ? "Claude" : "Codex";
+        var directory = CliDirectory(provider);
+        var folder = Path.GetFileName(directory.TrimEnd('\\'));
+        menu.Items.Add(new ToolStripMenuItem($"{name} CLI folder · {(folder.Length > 0 ? folder : directory)}…", null, (_, _) => ChooseCliFolder(provider))
+        {
+            ToolTipText = directory
+        });
+    }
+
+    private void ChooseCliFolder(QuotaProvider provider)
+    {
+        var name = provider == QuotaProvider.Claude ? "Claude" : "Codex";
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = $"Folder the {name} CLI opens in",
+            UseDescriptionForTitle = true,
+            SelectedPath = CliDirectory(provider)
+        };
+        if (dialog.ShowDialog() != DialogResult.OK)
+        {
+            return;
+        }
+
+        if (provider == QuotaProvider.Claude)
+        {
+            _quotaSettings.ClaudeCliDirectory = dialog.SelectedPath;
+        }
+        else
+        {
+            _quotaSettings.CodexCliDirectory = dialog.SelectedPath;
+        }
+
+        SaveSettings();
+    }
+
     private void OpenCli(QuotaProvider provider)
     {
         var name = provider == QuotaProvider.Claude ? "Claude" : "Codex";
@@ -442,7 +484,7 @@ internal sealed class NeonMonContext : ApplicationContext
         {
             ShowNotice($"The {name} CLI is not installed.");
         }
-        else if (!CliLauncher.Launch(command, provider == QuotaProvider.Claude ? _quotaSettings.ClaudeCliDirectory : null))
+        else if (!CliLauncher.Launch(command, CliDirectory(provider)))
         {
             ShowNotice($"Could not open a terminal for the {name} CLI.");
         }

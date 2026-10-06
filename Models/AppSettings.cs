@@ -25,4 +25,5 @@ internal sealed class QuotaSettings : StripSettings
     public bool ClaudeEndpointFallback { get; set; }
     public QuotaDisplay Display { get; set; } = QuotaDisplay.Remaining;
     public string ClaudeCliDirectory { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    public string CodexCliDirectory { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 }

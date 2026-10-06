@@ -17,6 +17,7 @@ internal sealed class AppSettings : StripSettings
     public int HtmlBridgePort { get; set; } = 27171;
     public List<string> HtmlBridgeAllowedOrigins { get; set; } = [];
     public FullscreenBehavior Fullscreen { get; set; } = FullscreenBehavior.StayOnTop;
+    public MenuStyle MenuStyle { get; set; } = MenuStyle.Windows;
     public QuotaSettings? Quota { get; set; }
 }
 

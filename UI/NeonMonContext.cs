@@ -16,6 +16,9 @@ internal sealed class NeonMonContext : ApplicationContext
     private readonly NotifyIcon _tray;
     private readonly ContextMenuStrip _systemMenu;
     private readonly ContextMenuStrip _quotaMenu;
+    private readonly ContextMenuStrip _trayMenu;
+    private readonly DarkMenuRenderer _darkMenuRenderer = new();
+    private SettingsForm? _settingsForm;
     private readonly bool _quotaSettingsCreated;
     private FullscreenWatcher? _fullscreenWatcher;
     private ForegroundWatcher? _foregroundWatcher;
@@ -52,6 +55,7 @@ internal sealed class NeonMonContext : ApplicationContext
         _quotaMenu = CreateMenu(QuotaForm);
         SystemForm.ContextMenuStrip = _systemMenu;
         QuotaForm.ContextMenuStrip = _quotaMenu;
+        _trayMenu = CreateTrayMenu();
 
         _trayIcon = TrayIcon.Create();
         _tray = new NotifyIcon
@@ -59,7 +63,7 @@ internal sealed class NeonMonContext : ApplicationContext
             Icon = _trayIcon,
             Text = "NeonMon",
             Visible = false,
-            ContextMenuStrip = _systemMenu
+            ContextMenuStrip = _trayMenu
         };
         _tray.MouseClick += (_, args) =>
         {
@@ -261,7 +265,15 @@ internal sealed class NeonMonContext : ApplicationContext
         return menu;
     }
 
-    private void PopulateMenu(ContextMenuStrip menu, WidgetForm target)
+    private ContextMenuStrip CreateTrayMenu()
+    {
+        var menu = new ContextMenuStrip { ShowImageMargin = false };
+        PopulateTrayMenu(menu);
+        menu.Opening += (_, _) => PopulateTrayMenu(menu);
+        return menu;
+    }
+
+    private static void ClearMenu(ContextMenuStrip menu)
     {
         var previous = menu.Items.Cast<ToolStripItem>().ToList();
         menu.Items.Clear();
@@ -269,18 +281,29 @@ internal sealed class NeonMonContext : ApplicationContext
         {
             item.Dispose();
         }
+    }
 
-        menu.Items.Add("Open", null, (_, _) => target.SetRevealState(RevealState.Open));
-        menu.Items.Add("Hide", null, (_, _) => target.SetRevealState(RevealState.Hidden));
+    private void PopulateMenu(ContextMenuStrip menu, WidgetForm target)
+    {
+        ClearMenu(menu);
+        ApplyMenuStyle(menu);
+        menu.Items.Add(new ToolStripMenuItem(ReferenceEquals(target, SystemForm) ? "SYSTEM PULSE" : "QUOTA PULSE") { Enabled = false });
 
-        var sizeMenu = new ToolStripMenuItem("Layout size");
+        var stripItems = new List<ToolStripItem>
+        {
+            new ToolStripMenuItem("Open", null, (_, _) => target.SetRevealState(RevealState.Open)),
+            new ToolStripMenuItem("Hide", null, (_, _) => target.SetRevealState(RevealState.Hidden)),
+            new ToolStripSeparator()
+        };
+
+        var sizeMenu = new ToolStripMenuItem("Size");
         foreach (var size in Enum.GetValues<WidgetSize>())
         {
             var item = new ToolStripMenuItem(size.ToString()) { Checked = target.Settings.Size == size };
             item.Click += (_, _) => target.SetWidgetSize(size);
             sizeMenu.DropDownItems.Add(item);
         }
-        menu.Items.Add(sizeMenu);
+        stripItems.Add(sizeMenu);
 
         var dockMenu = new ToolStripMenuItem("Dock edge");
         foreach (var edge in Enum.GetValues<DockEdge>())
@@ -289,15 +312,14 @@ internal sealed class NeonMonContext : ApplicationContext
             item.Click += (_, _) => target.SetDockEdge(edge);
             dockMenu.DropDownItems.Add(item);
         }
-        menu.Items.Add(dockMenu);
+        stripItems.Add(dockMenu);
 
         var monitorMenu = new ToolStripMenuItem("Monitor");
         var screens = Screen.AllScreens;
         for (var i = 0; i < screens.Length; i++)
         {
             var screen = screens[i];
-            var label = $"{i + 1} · {screen.Bounds.Width}×{screen.Bounds.Height}{(screen.Primary ? " (primary)" : "")}";
-            var item = new ToolStripMenuItem(label)
+            var item = new ToolStripMenuItem($"{i + 1} · {screen.Bounds.Width}×{screen.Bounds.Height}{(screen.Primary ? " (primary)" : "")}")
             {
                 Checked = !target.Settings.FollowMouse && target.DockScreen.DeviceName == screen.DeviceName
             };
@@ -312,78 +334,188 @@ internal sealed class NeonMonContext : ApplicationContext
         };
         followMouse.Click += (_, _) => target.SetFollowMouse(!target.Settings.FollowMouse);
         monitorMenu.DropDownItems.Add(followMouse);
-        menu.Items.Add(monitorMenu);
+        stripItems.Add(monitorMenu);
 
         var keepOpen = new ToolStripMenuItem("Keep open") { Checked = target.Settings.KeepOpen };
         keepOpen.Click += (_, _) => target.SetKeepOpen(!target.Settings.KeepOpen);
-        menu.Items.Add(keepOpen);
-        if (!target.Settings.Enabled)
+        stripItems.Add(keepOpen);
+
+        if (ReferenceEquals(target, QuotaForm))
         {
-            foreach (ToolStripItem item in menu.Items)
+            stripItems.Add(new ToolStripSeparator());
+            stripItems.Add(CliItem(QuotaProvider.Claude, "Open Claude CLI"));
+            stripItems.Add(CliItem(QuotaProvider.Codex, "Open Codex CLI"));
+
+            var displayMenu = new ToolStripMenuItem("Show quota as");
+            foreach (var display in Enum.GetValues<QuotaDisplay>())
             {
-                item.Enabled = false;
+                var label = display == QuotaDisplay.Remaining ? "Remaining (100 → 0)" : "Used (0 → 100)";
+                var item = new ToolStripMenuItem(label) { Checked = _quotaSettings.Display == display };
+                item.Click += (_, _) => SetQuotaDisplay(display);
+                displayMenu.DropDownItems.Add(item);
             }
+            stripItems.Add(displayMenu);
         }
 
-        var fullscreenMenu = new ToolStripMenuItem("Over fullscreen apps");
-        foreach (var behavior in Enum.GetValues<FullscreenBehavior>())
+        foreach (var item in stripItems)
         {
-            var label = behavior == FullscreenBehavior.StayOnTop ? "Stay on top" : "Hide";
-            var item = new ToolStripMenuItem(label) { Checked = _settings.Fullscreen == behavior };
-            item.Click += (_, _) => SetFullscreenBehavior(behavior);
-            fullscreenMenu.DropDownItems.Add(item);
+            item.Enabled &= target.Settings.Enabled;
+            menu.Items.Add(item);
         }
-        menu.Items.Add(fullscreenMenu);
 
-        var htmlBridge = new ToolStripMenuItem($"HTML bridge · 127.0.0.1:{_settings.HtmlBridgePort}") { Checked = _settings.HtmlBridgeEnabled };
-        htmlBridge.Click += (_, _) => ToggleBridge();
-        menu.Items.Add(htmlBridge);
+        AddCommonItems(menu);
+    }
 
+    private void PopulateTrayMenu(ContextMenuStrip menu)
+    {
+        ClearMenu(menu);
+        ApplyMenuStyle(menu);
+        foreach (var (form, name) in Pulses)
+        {
+            menu.Items.Add(new ToolStripMenuItem($"Open {name}", null, (_, _) => form.SetRevealState(RevealState.Open))
+            {
+                Enabled = form.Settings.Enabled
+            });
+        }
+
+        AddCommonItems(menu);
+    }
+
+    private void AddCommonItems(ContextMenuStrip menu)
+    {
         menu.Items.Add(new ToolStripSeparator());
-        if (ReferenceEquals(target, SystemForm) && _quotaSettings.Enabled)
-        {
-            menu.Items.Add("Open quota pulse", null, (_, _) => QuotaForm.SetRevealState(RevealState.Open));
-        }
-
-        AddCliItem(menu, QuotaProvider.Claude, "Open Claude CLI");
-        AddCliItem(menu, QuotaProvider.Codex, "Open Codex CLI");
-        AddCliFolderItem(menu, QuotaProvider.Claude);
-        AddCliFolderItem(menu, QuotaProvider.Codex);
-        menu.Items.Add("Copy Claude statusLine setting", null, (_, _) => CopyStatusLineSetting());
-
         var pulses = new ToolStripMenuItem("Pulses");
-        foreach (var (form, name) in new (WidgetForm, string)[] { (SystemForm, "System pulse"), (QuotaForm, "Quota pulse") })
+        foreach (var (form, name) in Pulses)
         {
             var item = new ToolStripMenuItem(name) { Checked = form.Settings.Enabled };
             item.Click += (_, _) => SetPulseEnabled(form, !form.Settings.Enabled);
             pulses.DropDownItems.Add(item);
         }
         menu.Items.Add(pulses);
-
-        var endpoint = new ToolStripMenuItem("Claude: live endpoint fallback")
-        {
-            Checked = _quotaSettings.ClaudeEndpointFallback,
-            ToolTipText = "When the CLI statusline data is stale, read plan usage from Anthropic's usage endpoint "
-                + "with the Claude CLI sign-in. Never refreshes tokens or calls a model."
-        };
-        endpoint.Click += (_, _) => SetClaudeEndpointFallback(!_quotaSettings.ClaudeEndpointFallback);
-        menu.Items.Add(endpoint);
-        menu.Items.Add(new ToolStripMenuItem(_quotaSettings.ClaudeEndpointFallback
-            ? "    on · used when statusline data is stale"
-            : "    off · statusline only (free, local)") { Enabled = false });
-
-        var displayMenu = new ToolStripMenuItem("Show quota as");
-        foreach (var display in Enum.GetValues<QuotaDisplay>())
-        {
-            var label = display == QuotaDisplay.Remaining ? "Remaining (100 → 0)" : "Used (0 → 100)";
-            var item = new ToolStripMenuItem(label) { Checked = _quotaSettings.Display == display };
-            item.Click += (_, _) => SetQuotaDisplay(display);
-            displayMenu.DropDownItems.Add(item);
-        }
-        menu.Items.Add(displayMenu);
-
-        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Settings…", null, (_, _) => ShowSettings());
         menu.Items.Add("Exit", null, (_, _) => Exit());
+    }
+
+    private (WidgetForm Form, string Name)[] Pulses => [(SystemForm, "System pulse"), (QuotaForm, "Quota pulse")];
+
+    private void ApplyMenuStyle(ContextMenuStrip menu)
+    {
+        if (_settings.MenuStyle == MenuStyle.Dark)
+        {
+            menu.Renderer = _darkMenuRenderer;
+        }
+        else
+        {
+            menu.RenderMode = ToolStripRenderMode.ManagerRenderMode;
+        }
+    }
+
+    private void ShowSettings()
+    {
+        if (_settingsForm is { IsDisposed: false })
+        {
+            _settingsForm.Activate();
+            return;
+        }
+
+        _settingsForm = new SettingsForm(BuildSettingsPages, _trayIcon);
+        _settingsForm.Show();
+        _settingsForm.Activate();
+    }
+
+    private IReadOnlyList<SettingsPage> BuildSettingsPages()
+    {
+        var general = new List<SettingsRow> { new SectionRow("Pulses") };
+        general.AddRange(Pulses.Select(pulse => new ToggleRow(pulse.Name, () => pulse.Form.Settings.Enabled, on => SetPulseEnabled(pulse.Form, on))));
+        general.AddRange(
+        [
+            new SectionRow("Appearance"),
+            new ChoiceRow("Menu style", ["Windows", "NeonMon dark"], () => (int)_settings.MenuStyle, SetMenuStyle, "Right-click and tray menus."),
+            new SectionRow("Behaviour"),
+            new ChoiceRow("Over fullscreen apps", ["Stay on top", "Hide"], () => (int)_settings.Fullscreen,
+                index => SetFullscreenBehavior((FullscreenBehavior)index)),
+            new SectionRow("Advanced"),
+            new ToggleRow($"HTML bridge · 127.0.0.1:{_settings.HtmlBridgePort}", () => _settings.HtmlBridgeEnabled, _ => ToggleBridge(),
+                "Local JSON for your own dashboards.")
+        ]);
+
+        var quota = StripRows(QuotaForm);
+        quota.AddRange(
+        [
+            new ChoiceRow("Show quota as", ["Remaining", "Used"], () => (int)_quotaSettings.Display, index => SetQuotaDisplay((QuotaDisplay)index)),
+            new SectionRow("Claude"),
+            new ActionRow("Status line data", StatusLineStatus, "Copy setting", CopyStatusLineSetting,
+                "Claude Code sends limits through its status line. Needs Node.js."),
+            new ToggleRow("Live endpoint fallback", () => _quotaSettings.ClaudeEndpointFallback, SetClaudeEndpointFallback,
+                "Uses your CLI sign-in when status line data is stale. Never calls a model."),
+            new ActionRow("CLI folder", () => _quotaSettings.ClaudeCliDirectory, "Browse", () => ChooseCliFolder(QuotaProvider.Claude)),
+            new SectionRow("Codex"),
+            new ActionRow("CLI folder", () => _quotaSettings.CodexCliDirectory, "Browse", () => ChooseCliFolder(QuotaProvider.Codex))
+        ]);
+
+        return
+        [
+            new SettingsPage("General", general),
+            new SettingsPage("System pulse", StripRows(SystemForm)),
+            new SettingsPage("Quota pulse", quota)
+        ];
+    }
+
+    private List<SettingsRow> StripRows(WidgetForm form)
+    {
+        var rows = new List<SettingsRow>
+        {
+            new SectionRow("Strip"),
+            new ToggleRow("Show this pulse", () => form.Settings.Enabled, on => SetPulseEnabled(form, on))
+        };
+        if (!form.Settings.Enabled)
+        {
+            return rows;
+        }
+
+        var screens = Screen.AllScreens;
+        rows.AddRange(
+        [
+            new ChoiceRow("Size", ["S", "M", "L"], () => (int)form.Settings.Size, index => form.SetWidgetSize((WidgetSize)index)),
+            new ChoiceRow("Dock edge", ["Top", "Bottom", "Left", "Right"], () => (int)form.Settings.DockEdge,
+                index => form.SetDockEdge((DockEdge)index)),
+            new ChoiceRow("Monitor", ["Follow mouse", .. screens.Select((_, i) => $"{i + 1}")],
+                () => form.Settings.FollowMouse ? 0 : Array.FindIndex(screens, screen => screen.DeviceName == form.DockScreen.DeviceName) + 1,
+                index =>
+                {
+                    if (index == 0)
+                    {
+                        form.SetFollowMouse(true);
+                    }
+                    else
+                    {
+                        form.SetMonitor(screens[index - 1]);
+                    }
+                }),
+            new ToggleRow("Keep open", () => form.Settings.KeepOpen, form.SetKeepOpen)
+        ]);
+        return rows;
+    }
+
+    private static string StatusLineStatus()
+    {
+        var file = new FileInfo(ClaudeStatuslineReader.FilePath);
+        if (!file.Exists)
+        {
+            return "no data yet";
+        }
+
+        var age = DateTime.UtcNow - file.LastWriteTimeUtc;
+        return age.TotalMinutes < 1 ? "updated just now"
+            : age.TotalHours < 1 ? $"updated {(int)age.TotalMinutes} min ago"
+            : age.TotalDays < 2 ? $"updated {(int)age.TotalHours}h ago"
+            : $"updated {(int)age.TotalDays}d ago";
+    }
+
+    private void SetMenuStyle(int index)
+    {
+        _settings.MenuStyle = (MenuStyle)index;
+        SaveSettings();
     }
 
     private void ToggleBridge()
@@ -425,10 +557,10 @@ internal sealed class NeonMonContext : ApplicationContext
 
     private void UpdateQuotaWork() => _quota.SetPaused(!_quotaSettings.Enabled && !_bridge.IsRunning);
 
-    private void AddCliItem(ContextMenuStrip menu, QuotaProvider provider, string text)
+    private ToolStripMenuItem CliItem(QuotaProvider provider, string text)
     {
         var installed = CliCommand(provider) is not null;
-        menu.Items.Add(new ToolStripMenuItem(installed ? text : $"{text} (not installed)", null, (_, _) => OpenCli(provider)) { Enabled = installed });
+        return new ToolStripMenuItem(installed ? text : $"{text} (not installed)", null, (_, _) => OpenCli(provider)) { Enabled = installed };
     }
 
     private static string? CliCommand(QuotaProvider provider) =>
@@ -439,17 +571,6 @@ internal sealed class NeonMonContext : ApplicationContext
 
     private string CliDirectory(QuotaProvider provider) =>
         provider == QuotaProvider.Claude ? _quotaSettings.ClaudeCliDirectory : _quotaSettings.CodexCliDirectory;
-
-    private void AddCliFolderItem(ContextMenuStrip menu, QuotaProvider provider)
-    {
-        var name = provider == QuotaProvider.Claude ? "Claude" : "Codex";
-        var directory = CliDirectory(provider);
-        var folder = Path.GetFileName(directory.TrimEnd('\\'));
-        menu.Items.Add(new ToolStripMenuItem($"{name} CLI folder · {(folder.Length > 0 ? folder : directory)}…", null, (_, _) => ChooseCliFolder(provider))
-        {
-            ToolTipText = directory
-        });
-    }
 
     private void ChooseCliFolder(QuotaProvider provider)
     {
@@ -621,6 +742,8 @@ internal sealed class NeonMonContext : ApplicationContext
         catch
         {
         }
+
+        _settingsForm?.Invalidate();
     }
 
     private void Exit()
@@ -631,6 +754,7 @@ internal sealed class NeonMonContext : ApplicationContext
         }
 
         _exiting = true;
+        _settingsForm?.Close();
         foreach (var form in Forms)
         {
             form.PrepareExit();
@@ -661,6 +785,7 @@ internal sealed class NeonMonContext : ApplicationContext
             QuotaForm.Dispose();
             _systemMenu.Dispose();
             _quotaMenu.Dispose();
+            _trayMenu.Dispose();
         }
 
         base.Dispose(disposing);

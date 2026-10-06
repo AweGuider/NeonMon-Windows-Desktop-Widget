@@ -42,7 +42,7 @@ More screenshots are in the [gallery](docs/gallery.md), and the [devlog](docs/de
 
 ## Highlights
 
-- **Out of the way:** hidden by default and never steals focus. Strips stay above fullscreen apps by default, or can hide while a fullscreen app runs on the primary monitor (**Over fullscreen apps** menu).
+- **Out of the way:** hidden by default and never steals focus. Strips stay above fullscreen apps by default, or can hide while a fullscreen app runs on the primary monitor (**Settings → General → Over fullscreen apps**).
 - **Light:** sampling pauses while a strip is hidden. Measured with both strips hidden, NeonMon uses about 0.1% of one CPU core and about 33 MB of memory.
 - **Multi-monitor:** put each strip on any monitor, dock it to any edge, and drag it along that edge. **Follow mouse** moves a hidden strip to whichever monitor the pointer is on. Text and layout scale correctly across monitors with different scaling.
 - **Readable anywhere:** the hidden tab pairs a dark body with a light ring, so it stays visible on white pages, bright video, and dark fullscreen video alike.
@@ -54,17 +54,17 @@ More screenshots are in the [gallery](docs/gallery.md), and the [devlog](docs/de
 
 Quota pulse never calls a model and never uses API keys. Its sources are local:
 
-- **Claude Code:** the plan limits Claude Code passes to its status line. This needs [Node.js](https://nodejs.org). The script ships as `tools\neonmon-statusline.js` next to `NeonMon.exe`, and **Copy Claude statusLine setting** in the menu copies the line below with the right path. Paste it into `~/.claude/settings.json`; it replaces any status line you already have:
+- **Claude Code:** the plan limits Claude Code passes to its status line. This needs [Node.js](https://nodejs.org). The script ships as `tools\neonmon-statusline.js` next to `NeonMon.exe`, and **Copy setting** in **Settings → Quota pulse** copies the line below with the right path. Paste it into `~/.claude/settings.json`; it replaces any status line you already have:
 
   ```json
   "statusLine": { "type": "command", "command": "node \"<path-to-NeonMon>/tools/neonmon-statusline.js\"" }
   ```
 
-  The script writes `%LOCALAPPDATA%\NeonMon\claude-statusline.json` whenever a CLI session renders its status line. The Claude desktop app does not run status lines, so Claude values refresh only when you use the `claude` CLI; older values are marked stale. **Open Claude CLI** in the menu opens a terminal and starts `claude` in the folder picked with **Claude CLI folder** in the menu (your user folder by default). **Open Codex CLI** and **Codex CLI folder** work the same way for Codex.
+  The script writes `%LOCALAPPDATA%\NeonMon\claude-statusline.json` whenever a CLI session renders its status line. The Claude desktop app does not run status lines, so Claude values refresh only when you use the `claude` CLI; older values are marked stale. **Open Claude CLI** in the Quota pulse menu opens a terminal and starts `claude` in the CLI folder set in **Settings → Quota pulse** (your user folder by default). **Open Codex CLI** works the same way for Codex.
 - **Codex:** the newest session log under `~/.codex/sessions`, plus a read-only `codex app-server` call (`account/rateLimits/read`) every 30 minutes for fresh limits and reset credits. The read does not consume quota.
-- **Claude live endpoint fallback (off by default):** when enabled from the tray menu and the statusline data is stale, NeonMon reads plan usage from `api.anthropic.com/api/oauth/usage` with the existing Claude CLI sign-in in `~/.claude/.credentials.json`. It only reads that file, never refreshes or stores tokens, waits at least two minutes between requests, backs off on errors, and skips the call when the sign-in has expired. The endpoint is undocumented and may change.
+- **Claude live endpoint fallback (off by default):** when enabled in **Settings → Quota pulse** and the statusline data is stale, NeonMon reads plan usage from `api.anthropic.com/api/oauth/usage` with the existing Claude CLI sign-in in `~/.claude/.credentials.json`. It only reads that file, never refreshes or stores tokens, waits at least two minutes between requests, backs off on errors, and skips the call when the sign-in has expired. The endpoint is undocumented and may change.
 
-Values show remaining quota by default; switch to used quota from the tray menu (**Show quota as**). Run `NeonMon.exe --dump-quota quota.json` to write the current quota data to a file.
+Values show remaining quota by default; switch to used quota with **Show quota as** in the Quota pulse menu or Settings. Run `NeonMon.exe --dump-quota quota.json` to write the current quota data to a file.
 
 ## Build and run
 
@@ -87,7 +87,7 @@ Settings are stored in `%LOCALAPPDATA%\NeonMon\settings.json`. Launching NeonMon
 
 ## HTML integration
 
-Enable **HTML bridge** from the tray menu, then fetch the local JSON endpoint:
+Enable **HTML bridge** in **Settings → General**, then fetch the local JSON endpoint:
 
 ```javascript
 const metrics = await fetch('http://127.0.0.1:27171/api/v1/metrics')

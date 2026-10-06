@@ -33,3 +33,9 @@ internal enum FullscreenBehavior
     StayOnTop,
     Hide
 }
+
+internal enum MenuStyle
+{
+    Windows,
+    Dark
+}

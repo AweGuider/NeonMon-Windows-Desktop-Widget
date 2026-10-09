@@ -197,6 +197,7 @@ internal static class Program
             context.QuotaForm.SetCliAvailability(true, true);
             var now = TelemetrySnapshot.Sample.CapturedAt;
             context.QuotaForm.Clock = () => now;
+            context.QuotaForm.TimeZone = TimeZoneInfo.Utc;
             context.QuotaForm.SetSnapshot(QuotaSnapshot.Sample(now));
         }
         else

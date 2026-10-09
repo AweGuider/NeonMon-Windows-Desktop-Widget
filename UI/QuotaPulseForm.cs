@@ -45,6 +45,9 @@ internal sealed class QuotaPulseForm : WidgetForm
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     internal Func<DateTimeOffset> Clock { get; set; } = () => DateTimeOffset.Now;
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal TimeZoneInfo TimeZone { get; set; } = TimeZoneInfo.Local;
+
     protected override string Title => "QUOTA PULSE";
 
     private bool ShowRemaining => _quotaSettings.Display == QuotaDisplay.Remaining;
@@ -570,7 +573,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         var lineTop = top + 20 * scale;
         if (quota.ResetCreditCount > 0)
         {
-            var expiry = quota.EarliestCreditExpiry is { } expires ? $" · exp {expires.ToLocalTime():MMM d}" : string.Empty;
+            var expiry = quota.EarliestCreditExpiry is { } expires ? $" · exp {Local(expires):MMM d}" : string.Empty;
             var noun = quota.ResetCreditCount == 1 ? "reset" : "resets";
             DrawCreditChip(graphics, quota, now, $"↻ {quota.ResetCreditCount} {noun}{expiry}", left, lineTop - 1 * scale);
             lineTop += 19 * scale;
@@ -710,7 +713,9 @@ internal sealed class QuotaPulseForm : WidgetForm
 
     private Color PulseColor(Color color) => _pulseOn ? color : Color.FromArgb(150, color);
 
-    private static string FiveHourDetail(QuotaWindow window, DateTimeOffset now, WidgetSize size)
+    private DateTimeOffset Local(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, TimeZone);
+
+    private string FiveHourDetail(QuotaWindow window, DateTimeOffset now, WidgetSize size)
     {
         if (window.HasReset(now) || window.ResetsAt is null)
         {
@@ -718,7 +723,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         }
 
         var left = FormatSpan(window.TimeLeft(now));
-        var at = window.ResetsAt.Value.ToLocalTime().ToString("HH:mm");
+        var at = Local(window.ResetsAt.Value).ToString("HH:mm");
         return size switch
         {
             WidgetSize.Small => $"5h · {left}",
@@ -727,7 +732,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         };
     }
 
-    private static string WeeklyDetail(QuotaWindow window, DateTimeOffset now, WidgetSize size)
+    private string WeeklyDetail(QuotaWindow window, DateTimeOffset now, WidgetSize size)
     {
         if (window.HasReset(now) || window.ResetsAt is null)
         {
@@ -735,7 +740,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         }
 
         var left = FormatSpan(window.TimeLeft(now));
-        var at = window.ResetsAt.Value.ToLocalTime().ToString("ddd HH:mm");
+        var at = Local(window.ResetsAt.Value).ToString("ddd HH:mm");
         return size switch
         {
             WidgetSize.Small => $"wk · {at}",

@@ -60,7 +60,8 @@ internal static class Program
         using var telemetry = new TelemetryService();
         using var quota = new QuotaService(
             () => settings.Quota?.ClaudeEndpointFallback == true,
-            provider => settings.Quota?.ActiveRefresh(provider) ?? TimeSpan.FromMinutes(QuotaSettings.ActiveRefreshChoices[0]));
+            provider => settings.Quota?.ActiveRefresh(provider) ?? TimeSpan.FromMinutes(QuotaSettings.ActiveRefreshChoices[0]),
+            provider => settings.Quota?.Shows(provider) ?? true);
         using var bridge = new MetricsBridge(() => telemetry.Latest, () => quota.Latest, () => settings.HtmlBridgeAllowedOrigins);
         using var context = new NeonMonContext(settings, settingsStore, telemetry, quota, bridge);
 
@@ -78,6 +79,12 @@ internal static class Program
         if (Enum.TryParse<DockEdge>(ArgumentValue(args, "--dock"), true, out var previewDock))
         {
             previewTarget.Settings.DockEdge = previewDock;
+        }
+
+        if (Enum.TryParse<QuotaProvider>(ArgumentValue(args, "--provider"), true, out var onlyProvider) && settings.Quota is { } previewQuota)
+        {
+            previewQuota.ShowClaude = onlyProvider == QuotaProvider.Claude;
+            previewQuota.ShowCodex = onlyProvider == QuotaProvider.Codex;
         }
 
         var peekPreviewIndex = Array.FindIndex(args, argument => argument.Equals("--render-peek-preview", StringComparison.OrdinalIgnoreCase));

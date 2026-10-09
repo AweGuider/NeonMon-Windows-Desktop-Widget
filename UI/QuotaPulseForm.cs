@@ -177,36 +177,52 @@ internal sealed class QuotaPulseForm : WidgetForm
 
     private bool TwoLines => _quotaSettings.HiddenTab == HiddenTabStyle.TwoLines;
 
+    private ProviderQuota[] VisibleQuotas => (_quotaSettings.Shows(QuotaProvider.Claude), _quotaSettings.Shows(QuotaProvider.Codex)) switch
+    {
+        (true, false) => [_snapshot.Claude],
+        (false, true) => [_snapshot.Codex],
+        _ => [_snapshot.Claude, _snapshot.Codex]
+    };
+
+    private static Color Tint(QuotaProvider provider) => provider == QuotaProvider.Claude ? ClaudeTint : CodexTint;
+
+    // One provider keeps the same bar length as each half of the two-provider tab.
     protected override Size GetLogicalHiddenSize(bool horizontal)
     {
         var thickness = TwoLines ? 17 : 9;
-        return horizontal ? new Size(132, thickness) : new Size(thickness, 132);
+        var length = VisibleQuotas.Length == 2 ? 132 : 68;
+        return horizontal ? new Size(length, thickness) : new Size(thickness, length);
     }
 
-    protected override Size GetLogicalOpenSize(WidgetSize size) => size switch
+    protected override Size GetLogicalOpenSize(WidgetSize size) => (size, VisibleQuotas.Length == 2) switch
     {
-        WidgetSize.Small => new Size(400, 112),
-        WidgetSize.Medium => new Size(520, 140),
-        _ => new Size(660, 200)
+        (WidgetSize.Small, true) => new Size(400, 112),
+        (WidgetSize.Small, false) => new Size(400, 74),
+        (WidgetSize.Medium, true) => new Size(520, 140),
+        (WidgetSize.Medium, false) => new Size(520, 89),
+        (_, true) => new Size(660, 200),
+        _ => new Size(660, 120)
     };
 
     protected override Size GetLogicalPeekSize(bool horizontal)
     {
         var now = Clock();
-        var claude = GetPeekItem(_snapshot.Claude, now);
-        var codex = GetPeekItem(_snapshot.Codex, now);
-        return horizontal
-            ? new Size((int)Math.Ceiling(2 * PeekPadding + PeekBlockWidth(claude) + PeekSeparator + PeekBlockWidth(codex)), 28)
-            : new Size(54, (int)Math.Ceiling(24 + PeekBlockHeight(claude) + 11 + PeekBlockHeight(codex)));
+        return PeekSize(horizontal, VisibleQuotas.Select(quota => GetPeekItem(quota, now)).ToList());
     }
 
     protected override Size GetLogicalPeekReserve(bool horizontal)
     {
         var widest = new PeekItem("100%", Foreground, "100%");
-        return horizontal
-            ? new Size((int)Math.Ceiling(2 * PeekPadding + 2 * PeekBlockWidth(widest) + PeekSeparator), 28)
-            : new Size(54, (int)Math.Ceiling(24 + 2 * PeekBlockHeight(widest) + 11));
+        return PeekSize(horizontal, VisibleQuotas.Select(_ => widest).ToList());
     }
+
+    private static Size PeekSize(bool horizontal, IReadOnlyList<PeekItem> items) => (horizontal, items.Count) switch
+    {
+        (true, 1) => new Size((int)Math.Ceiling(2 * PeekPadding + PeekBlockWidth(items[0])), 28),
+        (true, _) => new Size((int)Math.Ceiling(2 * PeekPadding + PeekBlockWidth(items[0]) + PeekSeparator + PeekBlockWidth(items[1])), 28),
+        (false, 1) => new Size(54, (int)Math.Ceiling(24 + PeekBlockHeight(items[0]))),
+        _ => new Size(54, (int)Math.Ceiling(24 + PeekBlockHeight(items[0]) + 11 + PeekBlockHeight(items[1])))
+    };
 
     private static float PeekTextWidth(string text) => text.Length * PeekCharWidth;
 
@@ -256,15 +272,22 @@ internal sealed class QuotaPulseForm : WidgetForm
         var circle = 8.5f * scale;
         var circleGap = 4 * scale;
         var middleGap = 4 * scale;
-        var segment = (length - 2 * (circle + circleGap) - middleGap) / 2f;
+        var visible = VisibleQuotas;
+        var segment = visible.Length == 2 ? (length - 2 * (circle + circleGap) - middleGap) / 2f : length - (circle + circleGap);
 
         var weeklyOnFarSide = Settings.DockEdge is DockEdge.Bottom or DockEdge.Right;
         var weekly = Across(core, weeklyOnFarSide ? weeklyThickness + lineGap : 0, weeklyThickness);
         var fiveHour = Across(core, weeklyOnFarSide ? 0 : weeklyThickness + lineGap, fiveHourThickness);
 
-        FillCircleAlong(graphics, core, ClaudeTint, 0, circle);
-        FillCircleAlong(graphics, core, CodexTint, length - circle, circle);
-        foreach (var (quota, start) in new[] { (_snapshot.Claude, circle + circleGap), (_snapshot.Codex, circle + circleGap + segment + middleGap) })
+        FillCircleAlong(graphics, core, Tint(visible[0].Provider), 0, circle);
+        var segments = new List<(ProviderQuota, float)> { (visible[0], circle + circleGap) };
+        if (visible.Length == 2)
+        {
+            FillCircleAlong(graphics, core, Tint(visible[1].Provider), length - circle, circle);
+            segments.Add((visible[1], circle + circleGap + segment + middleGap));
+        }
+
+        foreach (var (quota, start) in segments)
         {
             DrawStripSegment(graphics, weekly, quota, quota.Weekly, false, now, start, segment);
             StrokeAlong(graphics, weekly, start, segment);
@@ -281,13 +304,19 @@ internal sealed class QuotaPulseForm : WidgetForm
         var cap = 4 * scale;
         var capGap = 2 * scale;
         var middleGap = 4 * scale;
-        var segment = (length - 2 * (cap + capGap) - middleGap) / 2f;
+        var visible = VisibleQuotas;
+        var segment = visible.Length == 2 ? (length - 2 * (cap + capGap) - middleGap) / 2f : length - (cap + capGap);
 
-        FillAlong(graphics, core, ClaudeTint, 0, cap, 1);
-        FillAlong(graphics, core, CodexTint, length - cap, cap, 1);
-        DrawStripSegment(graphics, core, _snapshot.Claude, _snapshot.Claude.WorstWindow(now), _snapshot.Claude.UseItOrLoseIt(now), now, cap + capGap, segment);
-        DrawStripSegment(graphics, core, _snapshot.Codex, _snapshot.Codex.WorstWindow(now), _snapshot.Codex.UseItOrLoseIt(now), now,
-            cap + capGap + segment + middleGap, segment);
+        var first = visible[0];
+        FillAlong(graphics, core, Tint(first.Provider), 0, cap, 1);
+        DrawStripSegment(graphics, core, first, first.WorstWindow(now), first.UseItOrLoseIt(now), now, cap + capGap, segment);
+        if (visible.Length == 2)
+        {
+            var second = visible[1];
+            FillAlong(graphics, core, Tint(second.Provider), length - cap, cap, 1);
+            DrawStripSegment(graphics, core, second, second.WorstWindow(now), second.UseItOrLoseIt(now), now,
+                cap + capGap + segment + middleGap, segment);
+        }
     }
 
     private RectangleF Across(RectangleF core, float offset, float thickness) => IsHorizontal
@@ -351,6 +380,22 @@ internal sealed class QuotaPulseForm : WidgetForm
         DrawPeekOutline(graphics);
         var scale = DeviceDpi / 96f;
         var now = Clock();
+        var visible = VisibleQuotas;
+        if (visible.Length == 1)
+        {
+            var item = GetPeekItem(visible[0], now);
+            if (IsHorizontal)
+            {
+                DrawPeekBlock(graphics, visible[0].Provider, item, (Width - MeasurePeekBlock(graphics, item)) / 2f, Height / 2f);
+            }
+            else
+            {
+                DrawPeekColumn(graphics, visible[0].Provider, item, 12 * scale);
+            }
+
+            return;
+        }
+
         var claude = GetPeekItem(_snapshot.Claude, now);
         var codex = GetPeekItem(_snapshot.Codex, now);
 
@@ -442,33 +487,61 @@ internal sealed class QuotaPulseForm : WidgetForm
         Rectangle Area(float x, float y, float width, float height) =>
             Rectangle.Round(new RectangleF(x * scale, y * scale, width * scale, height * scale));
 
+        var visible = VisibleQuotas;
+        void SetLaunchAreas(float x, float firstY, float secondY, float width, float height)
+        {
+            _claudeLaunchArea = Rectangle.Empty;
+            _codexLaunchArea = Rectangle.Empty;
+            for (var index = 0; index < visible.Length; index++)
+            {
+                var area = Area(x, index == 0 ? firstY : secondY, width, height);
+                if (visible[index].Provider == QuotaProvider.Claude)
+                {
+                    _claudeLaunchArea = area;
+                }
+                else
+                {
+                    _codexLaunchArea = area;
+                }
+            }
+        }
+
         switch (Settings.Size)
         {
             case WidgetSize.Small:
-                _claudeLaunchArea = Area(8, 34, 56, 32);
-                _codexLaunchArea = Area(8, 72, 56, 32);
+                SetLaunchAreas(8, 34, 72, 56, 32);
                 DrawLaunchOutlines(graphics);
-                DrawCompactRow(graphics, _snapshot.Claude, now, 36 * scale, WidgetSize.Small);
-                DrawCompactRow(graphics, _snapshot.Codex, now, 74 * scale, WidgetSize.Small);
-                break;
-            case WidgetSize.Medium:
-                _claudeLaunchArea = Area(8, 33, 100, 45);
-                _codexLaunchArea = Area(8, 84, 100, 45);
-                DrawLaunchOutlines(graphics);
-                DrawCompactRow(graphics, _snapshot.Claude, now, 38 * scale, WidgetSize.Medium);
-                DrawCompactRow(graphics, _snapshot.Codex, now, 89 * scale, WidgetSize.Medium);
-                break;
-            default:
-                _claudeLaunchArea = Area(10, 34, 142, 72);
-                _codexLaunchArea = Area(10, 114, 142, 72);
-                DrawLaunchOutlines(graphics);
-                DrawLargeRow(graphics, _snapshot.Claude, now, 38 * scale);
-                using (var divider = new Pen(Color.FromArgb(22, 75, 226, 246)))
+                DrawCompactRow(graphics, visible[0], now, 36 * scale, WidgetSize.Small);
+                if (visible.Length == 2)
                 {
-                    graphics.DrawLine(divider, 16 * scale, 110 * scale, Width - 16 * scale, 110 * scale);
+                    DrawCompactRow(graphics, visible[1], now, 74 * scale, WidgetSize.Small);
                 }
 
-                DrawLargeRow(graphics, _snapshot.Codex, now, 118 * scale);
+                break;
+            case WidgetSize.Medium:
+                SetLaunchAreas(8, 33, 84, 100, 45);
+                DrawLaunchOutlines(graphics);
+                DrawCompactRow(graphics, visible[0], now, 38 * scale, WidgetSize.Medium);
+                if (visible.Length == 2)
+                {
+                    DrawCompactRow(graphics, visible[1], now, 89 * scale, WidgetSize.Medium);
+                }
+
+                break;
+            default:
+                SetLaunchAreas(10, 34, 114, 142, 72);
+                DrawLaunchOutlines(graphics);
+                DrawLargeRow(graphics, visible[0], now, 38 * scale);
+                if (visible.Length == 2)
+                {
+                    using (var divider = new Pen(Color.FromArgb(22, 75, 226, 246)))
+                    {
+                        graphics.DrawLine(divider, 16 * scale, 110 * scale, Width - 16 * scale, 110 * scale);
+                    }
+
+                    DrawLargeRow(graphics, visible[1], now, 118 * scale);
+                }
+
                 break;
         }
     }
@@ -481,7 +554,7 @@ internal sealed class QuotaPulseForm : WidgetForm
 
     private void DrawLaunchOutline(Graphics graphics, QuotaProvider provider, Rectangle area)
     {
-        if (!IsCliInstalled(provider))
+        if (area.IsEmpty || !IsCliInstalled(provider))
         {
             return;
         }

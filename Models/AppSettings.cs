@@ -25,6 +25,8 @@ internal sealed class AppSettings : StripSettings
 
 internal sealed class QuotaSettings : StripSettings
 {
+    public bool ShowClaude { get; set; } = true;
+    public bool ShowCodex { get; set; } = true;
     public bool ClaudeEndpointFallback { get; set; }
     public QuotaDisplay Display { get; set; } = QuotaDisplay.Remaining;
     public HiddenTabStyle HiddenTab { get; set; } = HiddenTabStyle.TwoLines;
@@ -34,6 +36,9 @@ internal sealed class QuotaSettings : StripSettings
     public int CodexActiveRefreshMinutes { get; set; } = ActiveRefreshChoices[0];
 
     public static int[] ActiveRefreshChoices { get; } = [2, 5, 10];
+
+    // With both providers off the pulse is disabled, so a layout never has to draw zero providers.
+    public bool Shows(QuotaProvider provider) => (!ShowClaude && !ShowCodex) || (provider == QuotaProvider.Claude ? ShowClaude : ShowCodex);
 
     public TimeSpan ActiveRefresh(QuotaProvider provider)
     {

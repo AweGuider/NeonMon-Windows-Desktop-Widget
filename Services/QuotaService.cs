@@ -17,6 +17,7 @@ internal sealed class QuotaService : IDisposable
 
     private readonly Func<bool> _claudeEndpointEnabled;
     private readonly Func<QuotaProvider, TimeSpan> _activeReadInterval;
+    private readonly Func<QuotaProvider, bool> _shown;
     private readonly ClaudeStatuslineReader _claude = new();
     private readonly ClaudeUsageEndpoint _claudeEndpoint = new();
     private readonly CodexSessionReader _codexSession = new();
@@ -38,10 +39,12 @@ internal sealed class QuotaService : IDisposable
     private long _claudeTranscriptWriteTicks;
     private FileSystemWatcher? _claudeTranscripts;
 
-    public QuotaService(Func<bool> claudeEndpointEnabled, Func<QuotaProvider, TimeSpan> activeReadInterval)
+    // A provider hidden in settings is not read at all, so it costs nothing and shows as no data everywhere.
+    public QuotaService(Func<bool> claudeEndpointEnabled, Func<QuotaProvider, TimeSpan> activeReadInterval, Func<QuotaProvider, bool> shown)
     {
-        _claudeEndpointEnabled = claudeEndpointEnabled;
+        _claudeEndpointEnabled = () => shown(QuotaProvider.Claude) && claudeEndpointEnabled();
         _activeReadInterval = activeReadInterval;
+        _shown = shown;
     }
 
     public QuotaSnapshot Latest { get; private set; } = QuotaSnapshot.Empty;
@@ -154,6 +157,11 @@ internal sealed class QuotaService : IDisposable
     {
         _appServerRequested = false;
         _appServerDueAt = DateTimeOffset.MaxValue;
+        if (!_shown(QuotaProvider.Codex))
+        {
+            return;
+        }
+
         var quota = await _codexAppServer.ReadAsync(_cancellation.Token).ConfigureAwait(false);
         var now = DateTimeOffset.Now;
         _lastAppServerAttempt = now;
@@ -232,8 +240,8 @@ internal sealed class QuotaService : IDisposable
 
             try
             {
-                var sessions = _codexSession.Read();
-                var statusline = _claude.Read();
+                var sessions = ReadCodexSessions();
+                var statusline = ReadStatusline();
                 ObserveLocalActivity(sessions, statusline);
                 if (AppServerDue(DateTimeOffset.Now))
                 {
@@ -286,14 +294,18 @@ internal sealed class QuotaService : IDisposable
         static DateTimeOffset Min(DateTimeOffset first, DateTimeOffset second) => first < second ? first : second;
     }
 
-    private QuotaSnapshot Compose() => Compose(_codexSession.Read(), _claude.Read());
+    private IReadOnlyList<ProviderQuota> ReadCodexSessions() => _shown(QuotaProvider.Codex) ? _codexSession.Read() : [];
+
+    private ProviderQuota? ReadStatusline() => _shown(QuotaProvider.Claude) ? _claude.Read() : null;
+
+    private QuotaSnapshot Compose() => Compose(ReadCodexSessions(), ReadStatusline());
 
     private QuotaSnapshot Compose(IReadOnlyList<ProviderQuota> sessions, ProviderQuota? statusline)
     {
         var claude = _claudeEndpointEnabled() ? Newest(statusline, _endpointQuota) : statusline;
         return new QuotaSnapshot(
             claude ?? new ProviderQuota { Provider = QuotaProvider.Claude },
-            MergeCodex(sessions, _appServerQuota))
+            _shown(QuotaProvider.Codex) ? MergeCodex(sessions, _appServerQuota) : new ProviderQuota { Provider = QuotaProvider.Codex })
         {
             ClaudeEndpointRequests = _claudeEndpoint.RequestCount,
             ClaudeEndpointStatus = _claudeEndpointEnabled() ? _claudeEndpoint.Status : null

@@ -348,8 +348,15 @@ internal sealed class NeonMonContext : ApplicationContext
         if (ReferenceEquals(target, QuotaForm))
         {
             stripItems.Add(new ToolStripSeparator());
-            stripItems.Add(CliItem(QuotaProvider.Claude, "Open Claude CLI"));
-            stripItems.Add(CliItem(QuotaProvider.Codex, "Open Codex CLI"));
+            if (_quotaSettings.Shows(QuotaProvider.Claude))
+            {
+                stripItems.Add(CliItem(QuotaProvider.Claude, "Open Claude CLI"));
+            }
+
+            if (_quotaSettings.Shows(QuotaProvider.Codex))
+            {
+                stripItems.Add(CliItem(QuotaProvider.Codex, "Open Codex CLI"));
+            }
 
             var displayMenu = new ToolStripMenuItem("Show quota as");
             foreach (var display in Enum.GetValues<QuotaDisplay>())
@@ -479,6 +486,7 @@ internal sealed class NeonMonContext : ApplicationContext
             new ChoiceRow("Hidden tab", ["Two lines", "One line"], () => (int)_quotaSettings.HiddenTab, index => SetHiddenTab((HiddenTabStyle)index),
                 "Two lines: weekly outside, 5-hour inside. One line: the tighter limit."),
             new SectionRow("Claude"),
+            new ToggleRow("Show Claude", () => _quotaSettings.ShowClaude, on => SetProviderShown(QuotaProvider.Claude, on)),
             new ActionRow("Status line data", StatusLineStatus, "Copy setting", CopyStatusLineSetting,
                 "Claude Code sends limits through its status line. Needs Node.js."),
             new ToggleRow("Live endpoint fallback", () => _quotaSettings.ClaudeEndpointFallback, SetClaudeEndpointFallback,
@@ -486,6 +494,7 @@ internal sealed class NeonMonContext : ApplicationContext
             ActiveRefreshRow(QuotaProvider.Claude, "Endpoint reads while Claude is in use. Idle: every 45 min."),
             new ActionRow("CLI folder", () => _quotaSettings.ClaudeCliDirectory, "Browse", () => ChooseCliFolder(QuotaProvider.Claude)),
             new SectionRow("Codex"),
+            new ToggleRow("Show Codex", () => _quotaSettings.ShowCodex, on => SetProviderShown(QuotaProvider.Codex, on)),
             ActiveRefreshRow(QuotaProvider.Codex, "Limit reads while Codex is in use. Idle: every 45 min."),
             new ActionRow("CLI folder", () => _quotaSettings.CodexCliDirectory, "Browse", () => ChooseCliFolder(QuotaProvider.Codex))
         ]);
@@ -723,6 +732,13 @@ internal sealed class NeonMonContext : ApplicationContext
 
     private void SetPulseEnabled(WidgetForm form, bool enabled)
     {
+        if (ReferenceEquals(form, QuotaForm) && enabled && !_quotaSettings.ShowClaude && !_quotaSettings.ShowCodex)
+        {
+            _quotaSettings.ShowClaude = true;
+            _quotaSettings.ShowCodex = true;
+            _quota.RequestRefresh();
+        }
+
         form.Settings.Enabled = enabled;
         SaveSettings();
         UpdateQuotaWork();
@@ -737,6 +753,39 @@ internal sealed class NeonMonContext : ApplicationContext
             ResolveSpacing(QuotaForm);
             QuotaForm.AnimateToLayout();
         }
+    }
+
+    // Hiding both providers turns the Quota pulse off; showing one again turns it back on.
+    private void SetProviderShown(QuotaProvider provider, bool shown)
+    {
+        if (provider == QuotaProvider.Claude)
+        {
+            _quotaSettings.ShowClaude = shown;
+        }
+        else
+        {
+            _quotaSettings.ShowCodex = shown;
+        }
+
+        _quota.RequestRefresh();
+        if (!_quotaSettings.ShowClaude && !_quotaSettings.ShowCodex)
+        {
+            SetPulseEnabled(QuotaForm, false);
+            return;
+        }
+
+        if (shown && !_quotaSettings.Enabled)
+        {
+            SetPulseEnabled(QuotaForm, true);
+        }
+        else
+        {
+            SaveSettings();
+        }
+
+        ResolveSpacing(QuotaForm);
+        QuotaForm.AnimateToLayout();
+        QuotaForm.Invalidate();
     }
 
     private void UpdateQuotaWork() => _quota.SetPaused(!_quotaSettings.Enabled && !_bridge.IsRunning);

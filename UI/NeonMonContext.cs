@@ -819,7 +819,7 @@ internal sealed class NeonMonContext : ApplicationContext
     private bool CanReveal(WidgetForm form)
     {
         var other = Other(form);
-        return !(other.Visible && other.State != RevealState.Hidden && other.Bounds.Contains(Cursor.Position));
+        return !(other.Visible && other.HoldsPointer(Cursor.Position));
     }
 
     private void OnRevealStateChanged(WidgetForm form, RevealState state)

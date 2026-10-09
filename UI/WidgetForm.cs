@@ -605,12 +605,17 @@ internal abstract class WidgetForm : Form
 
     private int HoverMargin() => Math.Max(6, (int)Math.Round(8 * DeviceDpi / 96f));
 
+    // Zones come from the target geometry, never the animated bounds. Peek is often shorter than the hidden tab, so
+    // Peek is kept inside the reserved hidden-and-peek area; otherwise a pointer near a tab end would leave Peek the
+    // moment it appeared and reveal it again.
+    internal bool HoldsPointer(Point point) => _state != RevealState.Hidden && GetHoverBounds().Contains(point);
+
     private Rectangle GetHoverBounds()
     {
         var margin = HoverMargin();
-        var bounds = Bounds;
+        var bounds = CalculateBounds(_state);
         bounds.Inflate(margin, margin);
-        return bounds;
+        return _state == RevealState.Peek ? Rectangle.Union(bounds, GetReservedHoverBounds(Settings.DockOffset)) : bounds;
     }
 
     private void EvaluatePointerState()

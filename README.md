@@ -11,6 +11,7 @@
 </p>
 
 <p align="center">
+  <a href="#why-neonmon">Why NeonMon</a> ·
   <a href="#what-it-is">What it is</a> ·
   <a href="#highlights">Highlights</a> ·
   <a href="#quota-pulse-data-sources">Data sources</a> ·
@@ -19,6 +20,10 @@
   <a href="docs/devlog.md">Devlog</a> ·
   <a href="SECURITY.md">Security</a>
 </p>
+
+## Why NeonMon
+
+NeonMon keeps system health and limited AI-agent quota visible at a glance without stealing focus, occupying the taskbar, or making you repeatedly open separate apps. You catch resource pressure early and always know how much Claude Code and Codex capacity is left, and when it resets, while you work.
 
 ## What it is
 

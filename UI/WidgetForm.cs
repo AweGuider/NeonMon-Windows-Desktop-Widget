@@ -51,6 +51,7 @@ internal abstract class WidgetForm : Form
     private double _dragStartOffset;
     private Screen _dockScreen;
     private bool _exiting;
+    private nint _menuPreviousForeground;
 
     protected WidgetForm(StripSettings settings, Action saveSettings)
     {
@@ -377,6 +378,34 @@ internal abstract class WidgetForm : Form
         }
     }
 
+    // The strips never activate, so their menu cannot see clicks in other apps and would stay open. Activating the
+    // menu, as Windows tray menus do, lets any outside click deactivate NeonMon and close it.
+    internal void MenuOpened(ToolStripDropDown menu)
+    {
+        HideTooltip();
+        _menuPreviousForeground = GetForegroundWindow();
+        SetWindowPos(menu.Handle, HwndTopmost, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+        SetForegroundWindow(menu.Handle);
+    }
+
+    internal void MenuClosed(ToolStripDropDownCloseReason reason)
+    {
+        ScheduleCollapse();
+        if (reason is ToolStripDropDownCloseReason.AppClicked or ToolStripDropDownCloseReason.AppFocusChange)
+        {
+            return;
+        }
+
+        var previous = _menuPreviousForeground;
+        BeginInvoke(() =>
+        {
+            if (Form.ActiveForm is null && previous != nint.Zero)
+            {
+                SetForegroundWindow(previous);
+            }
+        });
+    }
+
     internal Rectangle GetReservedHoverBounds(double offset)
     {
         var horizontal = IsHorizontal;
@@ -606,7 +635,7 @@ internal abstract class WidgetForm : Form
                 SetRevealState(RevealState.Peek);
             }
         }
-        else if (_state == RevealState.Peek && !inside)
+        else if (_state == RevealState.Peek && !inside && !IsMenuVisible)
         {
             HideTooltip();
             SetRevealState(RevealState.Hidden);
@@ -625,7 +654,7 @@ internal abstract class WidgetForm : Form
 
         if (_state == RevealState.Open || _hoveredTooltip is not null)
         {
-            UpdateTooltip(inside && _state == RevealState.Open ? PointToClient(Cursor.Position) : null);
+            UpdateTooltip(inside && _state == RevealState.Open && !IsMenuVisible ? PointToClient(Cursor.Position) : null);
         }
     }
 
@@ -959,6 +988,13 @@ internal abstract class WidgetForm : Form
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetWindowPos(nint window, nint insertAfter, int x, int y, int width, int height, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint window);
 
     protected override void OnFormClosing(FormClosingEventArgs args)
     {

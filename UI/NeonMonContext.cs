@@ -265,7 +265,8 @@ internal sealed class NeonMonContext : ApplicationContext
         var menu = new ContextMenuStrip { ShowImageMargin = false };
         PopulateMenu(menu, target);
         menu.Opening += (_, _) => PopulateMenu(menu, target);
-        menu.Closed += (_, _) => target.ScheduleCollapse();
+        menu.Opened += (_, _) => target.MenuOpened(menu);
+        menu.Closed += (_, args) => target.MenuClosed(args.CloseReason);
         return menu;
     }
 

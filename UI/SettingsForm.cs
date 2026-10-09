@@ -8,7 +8,7 @@ internal sealed record SettingsPage(string Title, IReadOnlyList<SettingsRow> Row
 
 internal abstract record SettingsRow(string Label, string? Hint = null);
 
-internal sealed record SectionRow(string Label) : SettingsRow(Label);
+internal sealed record SectionRow(string Label, string? Hint = null) : SettingsRow(Label, Hint);
 
 internal sealed record ToggleRow(string Label, Func<bool> Get, Action<bool> Set, string? Hint = null) : SettingsRow(Label, Hint);
 
@@ -21,6 +21,7 @@ internal sealed record ActionRow(string Label, Func<string> Value, string Button
 internal sealed class SettingsForm : Form
 {
     private const int LogicalWidth = 640;
+    private const int LogicalHeight = 560;
     private const int NavWidth = 150;
     private const int PagePadding = 18;
     private const int SectionHeight = 28;
@@ -38,6 +39,12 @@ internal sealed class SettingsForm : Form
     private readonly Func<IReadOnlyList<SettingsPage>> _pages;
     private readonly List<(Rectangle Area, Action Click)> _hitAreas = [];
     private int _pageIndex;
+    private float _scroll;
+    private RectangleF _track;
+    private RectangleF _thumb;
+    private bool _draggingThumb;
+    private float _dragStartY;
+    private float _dragStartScroll;
     private Font _labelFont = null!;
     private Font _hintFont = null!;
     private Font _sectionFont = null!;
@@ -55,7 +62,7 @@ internal sealed class SettingsForm : Form
         DoubleBuffered = true;
         AutoScaleMode = AutoScaleMode.None;
         CreateFonts();
-        ClientSize = new Size(Px(LogicalWidth), Px(RequiredHeight()));
+        ClientSize = new Size(Px(LogicalWidth), Px(LogicalHeight));
     }
 
     internal void SavePreview(string path, int page)
@@ -90,12 +97,11 @@ internal sealed class SettingsForm : Form
         _valueFont = CreateFont("Consolas", 8.5f, FontStyle.Regular);
     }
 
-    private int RequiredHeight() =>
-        _pages().Max(page => page.Rows.Sum(RowLogicalHeight)) + 2 * PagePadding;
+    private float ContentHeight(SettingsPage page) => Px(page.Rows.Sum(RowLogicalHeight) + 2 * PagePadding);
 
     private static int RowLogicalHeight(SettingsRow row) => row switch
     {
-        SectionRow => SectionHeight,
+        SectionRow => SectionHeight + (row.Hint is null ? 0 : HintHeight),
         _ => RowHeight + (row.Hint is null ? 0 : HintHeight)
     };
 
@@ -110,7 +116,7 @@ internal sealed class SettingsForm : Form
     {
         base.OnDpiChanged(args);
         CreateFonts();
-        ClientSize = new Size(Px(LogicalWidth), Px(RequiredHeight()));
+        ClientSize = new Size(Px(LogicalWidth), Px(LogicalHeight));
         Invalidate();
     }
 
@@ -123,18 +129,95 @@ internal sealed class SettingsForm : Form
 
         var pages = _pages();
         _pageIndex = Math.Clamp(_pageIndex, 0, pages.Count - 1);
-        var needed = Px(RequiredHeight());
-        if (ClientSize.Height < needed)
-        {
-            ClientSize = new Size(ClientSize.Width, needed);
-        }
+        var page = pages[_pageIndex];
+        var contentHeight = ContentHeight(page);
+        _scroll = Math.Clamp(_scroll, 0, Math.Max(0, contentHeight - ClientSize.Height));
 
         DrawNavigation(graphics, pages);
-        var y = (float)Px(PagePadding);
-        foreach (var row in pages[_pageIndex].Rows)
+        graphics.SetClip(new RectangleF(Px(NavWidth) + 1, 0, ClientSize.Width, ClientSize.Height));
+        var y = Px(PagePadding) - _scroll;
+        foreach (var row in page.Rows)
         {
-            DrawRow(graphics, row, y);
-            y += Px(RowLogicalHeight(row));
+            var height = Px(RowLogicalHeight(row));
+            if (y + height > 0 && y < ClientSize.Height)
+            {
+                DrawRow(graphics, row, y);
+            }
+
+            y += height;
+        }
+
+        graphics.ResetClip();
+        DrawScrollBar(graphics, contentHeight);
+    }
+
+    // The page area scrolls when it is taller than the window; the navigation stays put.
+    private void DrawScrollBar(Graphics graphics, float contentHeight)
+    {
+        var visible = (float)ClientSize.Height;
+        if (contentHeight <= visible)
+        {
+            _track = _thumb = RectangleF.Empty;
+            return;
+        }
+
+        _track = new RectangleF(ClientSize.Width - Px(9), Px(8), Px(5), visible - Px(16));
+        var thumbHeight = Math.Max(Px(28), _track.Height * visible / contentHeight);
+        var thumbTop = _track.Y + (_track.Height - thumbHeight) * _scroll / (contentHeight - visible);
+        _thumb = new RectangleF(_track.X, thumbTop, _track.Width, thumbHeight);
+        using (var trackPath = RoundedRectangle(_track, _track.Width / 2))
+        using (var trackBrush = new SolidBrush(Color.FromArgb(16, Cyan)))
+        {
+            graphics.FillPath(trackBrush, trackPath);
+        }
+
+        using var thumbPath = RoundedRectangle(_thumb, _thumb.Width / 2);
+        using var thumbBrush = new SolidBrush(Color.FromArgb(_draggingThumb ? 150 : 90, Cyan));
+        graphics.FillPath(thumbBrush, thumbPath);
+    }
+
+    private void ScrollTo(float scroll)
+    {
+        _scroll = scroll;
+        Invalidate();
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs args)
+    {
+        base.OnMouseWheel(args);
+        ScrollTo(_scroll - args.Delta / 120f * Px(RowHeight * 2));
+    }
+
+    protected override void OnMouseDown(MouseEventArgs args)
+    {
+        base.OnMouseDown(args);
+        if (args.Button != MouseButtons.Left || !_track.Contains(args.Location.X, args.Location.Y))
+        {
+            return;
+        }
+
+        if (_thumb.Contains(args.Location.X, args.Location.Y))
+        {
+            _draggingThumb = true;
+            _dragStartY = args.Y;
+            _dragStartScroll = _scroll;
+            Capture = true;
+            Invalidate();
+        }
+        else
+        {
+            ScrollTo(_scroll + (args.Y < _thumb.Y ? -1 : 1) * ClientSize.Height * 0.8f);
+        }
+    }
+
+    protected override void OnMouseUp(MouseEventArgs args)
+    {
+        base.OnMouseUp(args);
+        if (_draggingThumb)
+        {
+            _draggingThumb = false;
+            Capture = false;
+            Invalidate();
         }
     }
 
@@ -161,7 +244,11 @@ internal sealed class SettingsForm : Form
 
             DrawText(graphics, pages[i].Title, _labelFont, selected ? Foreground : Muted,
                 new RectangleF(item.X + Px(12), item.Y, item.Width - Px(12), item.Height), StringAlignment.Center);
-            _hitAreas.Add((Rectangle.Round(item), () => _pageIndex = index));
+            _hitAreas.Add((Rectangle.Round(item), () =>
+            {
+                _pageIndex = index;
+                _scroll = 0;
+            }));
         }
     }
 
@@ -173,6 +260,12 @@ internal sealed class SettingsForm : Form
         {
             DrawText(graphics, row.Label.ToUpperInvariant(), _sectionFont, Muted,
                 new RectangleF(left, y + Px(8), right - left, Px(SectionHeight - 8)), StringAlignment.Near);
+            if (row.Hint is not null)
+            {
+                DrawText(graphics, row.Hint, _hintFont, Muted, new RectangleF(left, y + Px(SectionHeight) - Px(2), right - left, Px(HintHeight)),
+                    StringAlignment.Near);
+            }
+
             return;
         }
 
@@ -318,6 +411,14 @@ internal sealed class SettingsForm : Form
     protected override void OnMouseMove(MouseEventArgs args)
     {
         base.OnMouseMove(args);
+        if (_draggingThumb)
+        {
+            var range = _track.Height - _thumb.Height;
+            var contentRange = ContentHeight(_pages()[_pageIndex]) - ClientSize.Height;
+            ScrollTo(_dragStartScroll + (args.Y - _dragStartY) * (range > 0 ? contentRange / range : 0));
+            return;
+        }
+
         Cursor = _hitAreas.Any(hit => hit.Area.Contains(args.Location)) ? Cursors.Hand : Cursors.Default;
     }
 

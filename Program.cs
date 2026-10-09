@@ -58,7 +58,9 @@ internal static class Program
         var rendering = args.Any(argument => argument.StartsWith("--render-", StringComparison.OrdinalIgnoreCase));
         var settings = rendering && useSample ? SampleSettings() : settingsStore.Load();
         using var telemetry = new TelemetryService();
-        using var quota = new QuotaService(() => settings.Quota?.ClaudeEndpointFallback == true);
+        using var quota = new QuotaService(
+            () => settings.Quota?.ClaudeEndpointFallback == true,
+            provider => settings.Quota?.ActiveRefresh(provider) ?? TimeSpan.FromMinutes(QuotaSettings.ActiveRefreshChoices[0]));
         using var bridge = new MetricsBridge(() => telemetry.Latest, () => quota.Latest, () => settings.HtmlBridgeAllowedOrigins);
         using var context = new NeonMonContext(settings, settingsStore, telemetry, quota, bridge);
 
@@ -130,6 +132,11 @@ internal static class Program
                 if (!SelfTestCodexMerge())
                 {
                     return 6;
+                }
+
+                if (!SelfTestRefreshPolicy())
+                {
+                    return 7;
                 }
 
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
@@ -262,6 +269,31 @@ internal static class Program
             && afterReset.FiveHour?.UsedPercent == 1
             && newWindow.FiveHour?.UsedPercent == 3
             && exhausted.FiveHour?.UsedPercent == 100 && exhausted.Source == "app-server";
+    }
+
+    private static bool SelfTestRefreshPolicy()
+    {
+        var now = new DateTimeOffset(2026, 10, 9, 12, 0, 0, TimeSpan.Zero);
+        var reset = now.AddHours(2);
+        ProviderQuota Used(double used, DateTimeOffset resetsAt) => new()
+        {
+            Provider = QuotaProvider.Codex,
+            FiveHour = new QuotaWindow(used, resetsAt, 300)
+        };
+
+        var active = TimeSpan.FromMinutes(5);
+        var settings = new QuotaSettings { CodexActiveRefreshMinutes = 7 };
+        return QuotaService.AppServerInterval(false, now.AddMinutes(-3), now, active) == active
+            && QuotaService.AppServerInterval(false, now.AddMinutes(-11), now, active) == TimeSpan.FromMinutes(45)
+            && QuotaService.AppServerInterval(true, now.AddMinutes(-11), now, active) == TimeSpan.FromMinutes(5)
+            && QuotaService.EndpointMaxAge(true, DateTimeOffset.MinValue, now, active) == TimeSpan.FromMinutes(2)
+            && QuotaService.EndpointMaxAge(false, now.AddMinutes(-3), now, active) == active
+            && QuotaService.EndpointMaxAge(false, DateTimeOffset.MinValue, now, active) == TimeSpan.FromMinutes(45)
+            && settings.ActiveRefresh(QuotaProvider.Codex) == TimeSpan.FromMinutes(2)
+            && settings.ActiveRefresh(QuotaProvider.Claude) == TimeSpan.FromMinutes(2)
+            && QuotaService.Consumed(Used(40, reset), Used(41, reset.AddSeconds(30)))
+            && !QuotaService.Consumed(Used(41, reset), Used(41, reset))
+            && !QuotaService.Consumed(Used(90, reset), Used(5, reset.AddHours(5)));
     }
 
     private static string? ArgumentValue(string[] args, string name)

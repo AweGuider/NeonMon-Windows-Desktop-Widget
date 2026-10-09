@@ -30,4 +30,14 @@ internal sealed class QuotaSettings : StripSettings
     public HiddenTabStyle HiddenTab { get; set; } = HiddenTabStyle.TwoLines;
     public string ClaudeCliDirectory { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     public string CodexCliDirectory { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    public int ClaudeActiveRefreshMinutes { get; set; } = ActiveRefreshChoices[0];
+    public int CodexActiveRefreshMinutes { get; set; } = ActiveRefreshChoices[0];
+
+    public static int[] ActiveRefreshChoices { get; } = [2, 5, 10];
+
+    public TimeSpan ActiveRefresh(QuotaProvider provider)
+    {
+        var minutes = provider == QuotaProvider.Claude ? ClaudeActiveRefreshMinutes : CodexActiveRefreshMinutes;
+        return TimeSpan.FromMinutes(ActiveRefreshChoices.Contains(minutes) ? minutes : ActiveRefreshChoices[0]);
+    }
 }

@@ -483,8 +483,10 @@ internal sealed class NeonMonContext : ApplicationContext
                 "Claude Code sends limits through its status line. Needs Node.js."),
             new ToggleRow("Live endpoint fallback", () => _quotaSettings.ClaudeEndpointFallback, SetClaudeEndpointFallback,
                 "Uses your CLI sign-in when status line data is stale. Never calls a model."),
+            ActiveRefreshRow(QuotaProvider.Claude, "Endpoint reads while Claude is in use. Idle: every 45 min."),
             new ActionRow("CLI folder", () => _quotaSettings.ClaudeCliDirectory, "Browse", () => ChooseCliFolder(QuotaProvider.Claude)),
             new SectionRow("Codex"),
+            ActiveRefreshRow(QuotaProvider.Codex, "Limit reads while Codex is in use. Idle: every 45 min."),
             new ActionRow("CLI folder", () => _quotaSettings.CodexCliDirectory, "Browse", () => ChooseCliFolder(QuotaProvider.Codex))
         ]);
 
@@ -796,6 +798,28 @@ internal sealed class NeonMonContext : ApplicationContext
     private void SetClaudeEndpointFallback(bool enabled)
     {
         _quotaSettings.ClaudeEndpointFallback = enabled;
+        SaveSettings();
+        _quota.RequestRefresh();
+    }
+
+    private ChoiceRow ActiveRefreshRow(QuotaProvider provider, string hint) => new(
+        "Refresh while in use",
+        [.. QuotaSettings.ActiveRefreshChoices.Select(minutes => $"{minutes} min")],
+        () => Array.IndexOf(QuotaSettings.ActiveRefreshChoices, (int)_quotaSettings.ActiveRefresh(provider).TotalMinutes),
+        index => SetActiveRefresh(provider, QuotaSettings.ActiveRefreshChoices[index]),
+        hint);
+
+    private void SetActiveRefresh(QuotaProvider provider, int minutes)
+    {
+        if (provider == QuotaProvider.Claude)
+        {
+            _quotaSettings.ClaudeActiveRefreshMinutes = minutes;
+        }
+        else
+        {
+            _quotaSettings.CodexActiveRefreshMinutes = minutes;
+        }
+
         SaveSettings();
         _quota.RequestRefresh();
     }

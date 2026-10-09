@@ -4,7 +4,9 @@ namespace NeonMon.Services;
 
 internal sealed class QuotaService : IDisposable
 {
-    private static readonly TimeSpan AppServerInterval = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan IdleReadInterval = TimeSpan.FromMinutes(45);
+    private static readonly TimeSpan ActivityTimeout = TimeSpan.FromMinutes(10);
+
     private static readonly TimeSpan AppServerRetry = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan AppServerRefreshOnOpen = TimeSpan.FromMinutes(10);
 
@@ -14,6 +16,7 @@ internal sealed class QuotaService : IDisposable
     private static readonly TimeSpan ResetJitter = TimeSpan.FromMinutes(2);
 
     private readonly Func<bool> _claudeEndpointEnabled;
+    private readonly Func<QuotaProvider, TimeSpan> _activeReadInterval;
     private readonly ClaudeStatuslineReader _claude = new();
     private readonly ClaudeUsageEndpoint _claudeEndpoint = new();
     private readonly CodexSessionReader _codexSession = new();
@@ -25,12 +28,20 @@ internal sealed class QuotaService : IDisposable
     private volatile bool _paused;
     private ProviderQuota? _endpointQuota;
     private ProviderQuota? _appServerQuota;
-    private DateTimeOffset _nextAppServerRead;
+    private DateTimeOffset _appServerDueAt = DateTimeOffset.MaxValue;
+    private volatile bool _appServerRequested;
+    private DateTimeOffset _lastAppServerAttempt;
+    private bool _lastAppServerFailed;
     private DateTimeOffset _lastAppServerSuccess = DateTimeOffset.MinValue;
+    private DateTimeOffset _codexActivity = DateTimeOffset.MinValue;
+    private DateTimeOffset _claudeActivity = DateTimeOffset.MinValue;
+    private long _claudeTranscriptWriteTicks;
+    private FileSystemWatcher? _claudeTranscripts;
 
-    public QuotaService(Func<bool> claudeEndpointEnabled)
+    public QuotaService(Func<bool> claudeEndpointEnabled, Func<QuotaProvider, TimeSpan> activeReadInterval)
     {
         _claudeEndpointEnabled = claudeEndpointEnabled;
+        _activeReadInterval = activeReadInterval;
     }
 
     public QuotaSnapshot Latest { get; private set; } = QuotaSnapshot.Empty;
@@ -44,8 +55,37 @@ internal sealed class QuotaService : IDisposable
             return;
         }
 
-        _nextAppServerRead = DateTimeOffset.Now.AddSeconds(5);
+        _lastAppServerAttempt = DateTimeOffset.Now;
+        _appServerDueAt = DateTimeOffset.Now.AddSeconds(5);
+        _claudeTranscripts = WatchClaudeTranscripts();
         _loop = Task.Run(LoopAsync);
+    }
+
+    // Claude Code transcripts (CLI and the desktop Code tab) are written on every turn, which marks Claude as in use
+    // even when no statusline runs. Notifications are only enabled while the endpoint fallback can use them.
+    private FileSystemWatcher? WatchClaudeTranscripts()
+    {
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "projects");
+        if (!Directory.Exists(root))
+        {
+            return null;
+        }
+
+        try
+        {
+            var watcher = new FileSystemWatcher(root, "*.jsonl")
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName
+            };
+            watcher.Changed += (_, _) => Interlocked.Exchange(ref _claudeTranscriptWriteTicks, DateTimeOffset.UtcNow.UtcTicks);
+            watcher.Created += (_, _) => Interlocked.Exchange(ref _claudeTranscriptWriteTicks, DateTimeOffset.UtcNow.UtcTicks);
+            return watcher;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public void SetActive(bool active)
@@ -58,7 +98,7 @@ internal sealed class QuotaService : IDisposable
 
         if (DateTimeOffset.Now - _lastAppServerSuccess > AppServerRefreshOnOpen)
         {
-            _nextAppServerRead = DateTimeOffset.Now;
+            _appServerRequested = true;
         }
 
         Wake();
@@ -81,18 +121,56 @@ internal sealed class QuotaService : IDisposable
 
     public async Task<QuotaSnapshot> RefreshAllAsync()
     {
-        var quota = await _codexAppServer.ReadAsync(_cancellation.Token).ConfigureAwait(false);
-        if (quota is not null)
-        {
-            _appServerQuota = quota;
-            _lastAppServerSuccess = DateTimeOffset.Now;
-        }
-
+        await ReadAppServerAsync().ConfigureAwait(false);
         await RefreshClaudeEndpointAsync().ConfigureAwait(false);
         return RefreshLocal();
     }
 
     public void RequestRefresh() => Wake();
+
+    // A provider is active while it shows real use: a recent Codex session line, Claude statusline save or Claude Code
+    // transcript write, or a provider read reporting higher usage than the previous one. An open but idle app does not count.
+    internal static bool IsActive(DateTimeOffset lastActivity, DateTimeOffset now) => now - lastActivity < ActivityTimeout;
+
+    internal static TimeSpan AppServerInterval(bool lastFailed, DateTimeOffset codexActivity, DateTimeOffset now, TimeSpan activeInterval) =>
+        lastFailed ? AppServerRetry : IsActive(codexActivity, now) ? activeInterval : IdleReadInterval;
+
+    internal static TimeSpan EndpointMaxAge(bool open, DateTimeOffset claudeActivity, DateTimeOffset now, TimeSpan activeInterval) =>
+        open ? EndpointRefreshWhileOpen : IsActive(claudeActivity, now) ? activeInterval : IdleReadInterval;
+
+    internal static bool Consumed(ProviderQuota? before, ProviderQuota? after) =>
+        before is not null && after is not null && (Grew(before.FiveHour, after.FiveHour) || Grew(before.Weekly, after.Weekly));
+
+    private static bool Grew(QuotaWindow? before, QuotaWindow? after) =>
+        before?.ResetsAt is { } beforeReset && after?.ResetsAt is { } afterReset
+        && (afterReset - beforeReset).Duration() <= ResetJitter
+        && after.UsedPercent > before.UsedPercent;
+
+    private bool AppServerDue(DateTimeOffset now) =>
+        _appServerRequested || now >= _appServerDueAt
+        || now - _lastAppServerAttempt >= AppServerInterval(_lastAppServerFailed, _codexActivity, now, _activeReadInterval(QuotaProvider.Codex));
+
+    private async Task ReadAppServerAsync()
+    {
+        _appServerRequested = false;
+        _appServerDueAt = DateTimeOffset.MaxValue;
+        var quota = await _codexAppServer.ReadAsync(_cancellation.Token).ConfigureAwait(false);
+        var now = DateTimeOffset.Now;
+        _lastAppServerAttempt = now;
+        _lastAppServerFailed = quota is null;
+        if (quota is null)
+        {
+            return;
+        }
+
+        if (Consumed(_appServerQuota, quota))
+        {
+            _codexActivity = now;
+        }
+
+        _appServerQuota = quota;
+        _lastAppServerSuccess = now;
+    }
 
     private async Task RefreshClaudeEndpointAsync()
     {
@@ -103,8 +181,7 @@ internal sealed class QuotaService : IDisposable
 
         var now = DateTimeOffset.Now;
         var current = Newest(_claude.Read(), _endpointQuota);
-        var freshEnough = current?.CapturedAt is { } capturedAt
-            && (_active ? now - capturedAt < EndpointRefreshWhileOpen : !current.IsStale(now));
+        var freshEnough = current?.CapturedAt is { } capturedAt && now - capturedAt < EndpointMaxAge(_active, _claudeActivity, now, _activeReadInterval(QuotaProvider.Claude));
         if (freshEnough || !_claudeEndpoint.CanRequest(now))
         {
             return;
@@ -113,6 +190,11 @@ internal sealed class QuotaService : IDisposable
         var quota = await _claudeEndpoint.ReadAsync(_cancellation.Token).ConfigureAwait(false);
         if (quota is not null)
         {
+            if (Consumed(current, quota))
+            {
+                _claudeActivity = DateTimeOffset.Now;
+            }
+
             _endpointQuota = quota;
         }
     }
@@ -150,20 +232,16 @@ internal sealed class QuotaService : IDisposable
 
             try
             {
-                if (DateTimeOffset.Now >= _nextAppServerRead)
+                var sessions = _codexSession.Read();
+                var statusline = _claude.Read();
+                ObserveLocalActivity(sessions, statusline);
+                if (AppServerDue(DateTimeOffset.Now))
                 {
-                    var quota = await _codexAppServer.ReadAsync(_cancellation.Token).ConfigureAwait(false);
-                    if (quota is not null)
-                    {
-                        _appServerQuota = quota;
-                        _lastAppServerSuccess = DateTimeOffset.Now;
-                    }
-
-                    _nextAppServerRead = DateTimeOffset.Now + (quota is null ? AppServerRetry : AppServerInterval);
+                    await ReadAppServerAsync().ConfigureAwait(false);
                 }
 
                 await RefreshClaudeEndpointAsync().ConfigureAwait(false);
-                var snapshot = Compose();
+                var snapshot = Compose(sessions, statusline);
                 Latest = snapshot;
                 SnapshotUpdated?.Invoke(snapshot);
             }
@@ -182,13 +260,40 @@ internal sealed class QuotaService : IDisposable
         }
     }
 
-    private QuotaSnapshot Compose()
+    private void ObserveLocalActivity(IReadOnlyList<ProviderQuota> sessions, ProviderQuota? statusline)
     {
-        var statusline = _claude.Read();
+        var now = DateTimeOffset.Now;
+        foreach (var capturedAt in sessions.Select(session => session.CapturedAt).OfType<DateTimeOffset>())
+        {
+            _codexActivity = Max(_codexActivity, Min(capturedAt, now));
+        }
+
+        if (statusline?.CapturedAt is { } savedAt)
+        {
+            _claudeActivity = Max(_claudeActivity, Min(savedAt, now));
+        }
+
+        if (_claudeTranscripts is not null)
+        {
+            _claudeTranscripts.EnableRaisingEvents = _claudeEndpointEnabled();
+            if (Interlocked.Read(ref _claudeTranscriptWriteTicks) is var ticks and > 0)
+            {
+                _claudeActivity = Max(_claudeActivity, new DateTimeOffset(ticks, TimeSpan.Zero));
+            }
+        }
+
+        static DateTimeOffset Max(DateTimeOffset first, DateTimeOffset second) => first > second ? first : second;
+        static DateTimeOffset Min(DateTimeOffset first, DateTimeOffset second) => first < second ? first : second;
+    }
+
+    private QuotaSnapshot Compose() => Compose(_codexSession.Read(), _claude.Read());
+
+    private QuotaSnapshot Compose(IReadOnlyList<ProviderQuota> sessions, ProviderQuota? statusline)
+    {
         var claude = _claudeEndpointEnabled() ? Newest(statusline, _endpointQuota) : statusline;
         return new QuotaSnapshot(
             claude ?? new ProviderQuota { Provider = QuotaProvider.Claude },
-            MergeCodex(_codexSession.Read(), _appServerQuota))
+            MergeCodex(sessions, _appServerQuota))
         {
             ClaudeEndpointRequests = _claudeEndpoint.RequestCount,
             ClaudeEndpointStatus = _claudeEndpointEnabled() ? _claudeEndpoint.Status : null
@@ -249,6 +354,7 @@ internal sealed class QuotaService : IDisposable
 
         _cancellation.Dispose();
         _wake.Dispose();
+        _claudeTranscripts?.Dispose();
         _claudeEndpoint.Dispose();
     }
 }

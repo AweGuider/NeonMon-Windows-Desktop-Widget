@@ -45,11 +45,13 @@ internal static class CliLauncher
     {
         try
         {
-            using var process = Process.Start(new ProcessStartInfo(fileName, arguments)
+            var startInfo = new ProcessStartInfo(fileName, arguments)
             {
-                UseShellExecute = true,
+                UseShellExecute = false,
                 WorkingDirectory = workingDirectory
-            });
+            };
+            RemoveSessionVariables(startInfo.Environment);
+            using var process = Process.Start(startInfo);
             return process is not null;
         }
         catch
@@ -57,4 +59,25 @@ internal static class CliLauncher
             return false;
         }
     }
+
+    // NeonMon started from inside a Claude session inherits that session's markers and endpoint, which make the new
+    // CLI run as a nested session. Only variables the user also set persistently in Windows are kept.
+    private static void RemoveSessionVariables(IDictionary<string, string?> environment)
+    {
+        var persistent = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var target in new[] { EnvironmentVariableTarget.User, EnvironmentVariableTarget.Machine })
+        {
+            persistent.UnionWith(Environment.GetEnvironmentVariables(target).Keys.OfType<string>());
+        }
+
+        foreach (var name in environment.Keys.Where(name => IsClaudeVariable(name) && !persistent.Contains(name)).ToList())
+        {
+            environment.Remove(name);
+        }
+    }
+
+    private static bool IsClaudeVariable(string name) =>
+        name.Equals("CLAUDECODE", StringComparison.OrdinalIgnoreCase)
+        || name.StartsWith("CLAUDE_", StringComparison.OrdinalIgnoreCase)
+        || name.StartsWith("ANTHROPIC_", StringComparison.OrdinalIgnoreCase);
 }

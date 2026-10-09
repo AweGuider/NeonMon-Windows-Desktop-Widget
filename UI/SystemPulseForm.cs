@@ -14,6 +14,7 @@ internal sealed class SystemPulseForm : WidgetForm
     private readonly AppSettings _settings;
     private readonly TelemetryService _telemetry;
     private readonly Dictionary<string, Rectangle> _driveHitAreas = [];
+    private readonly List<Rectangle> _taskManagerHitAreas = [];
     private Rectangle _uptimeArea;
     private TelemetrySnapshot _snapshot = TelemetrySnapshot.Empty;
     private Font _peekFont = null!;
@@ -110,6 +111,12 @@ internal sealed class SystemPulseForm : WidgetForm
             }
         }
 
+        if (_taskManagerHitAreas.Any(area => area.Contains(point)))
+        {
+            OpenTaskManager();
+            return true;
+        }
+
         return false;
     }
 
@@ -121,6 +128,11 @@ internal sealed class SystemPulseForm : WidgetForm
             {
                 return $"Open {drive.Key} in File Explorer";
             }
+        }
+
+        if (_taskManagerHitAreas.Any(area => area.Contains(point)))
+        {
+            return "Open Task Manager";
         }
 
         return _uptimeArea.Contains(point)
@@ -141,6 +153,19 @@ internal sealed class SystemPulseForm : WidgetForm
         catch
         {
             ShowNotice($"Could not open {driveName}.");
+        }
+    }
+
+    // Shell execute lets Windows handle Task Manager's elevation; a direct start fails for administrators.
+    private void OpenTaskManager()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("taskmgr.exe") { UseShellExecute = true });
+        }
+        catch
+        {
+            ShowNotice("Could not open Task Manager.");
         }
     }
 
@@ -312,6 +337,7 @@ internal sealed class SystemPulseForm : WidgetForm
     protected override void DrawBody(Graphics graphics)
     {
         _driveHitAreas.Clear();
+        _taskManagerHitAreas.Clear();
 
         switch (Settings.Size)
         {
@@ -332,8 +358,8 @@ internal sealed class SystemPulseForm : WidgetForm
         var scale = DeviceDpi / 96f;
         var top = 34 * scale;
         DrawUptime(graphics, new RectangleF(14 * scale, top, 126 * scale, 38 * scale), compact: true);
-        DrawMetric(graphics, new RectangleF(148 * scale, top, 58 * scale, 38 * scale), "CPU", Percent(_snapshot.CpuPercent), null, _snapshot.CpuPercent);
-        DrawMetric(graphics, new RectangleF(214 * scale, top, 58 * scale, 38 * scale), "GPU", Percent(_snapshot.GpuPercent), null, _snapshot.GpuPercent);
+        DrawLoadMetric(graphics, new RectangleF(148 * scale, top, 58 * scale, 38 * scale), "CPU", Percent(_snapshot.CpuPercent), null, _snapshot.CpuPercent);
+        DrawLoadMetric(graphics, new RectangleF(214 * scale, top, 58 * scale, 38 * scale), "GPU", Percent(_snapshot.GpuPercent), null, _snapshot.GpuPercent);
         DrawDriveMetric(graphics, new RectangleF(280 * scale, top, 86 * scale, 38 * scale), _snapshot.Drives.FirstOrDefault(), compact: true);
     }
 
@@ -342,9 +368,9 @@ internal sealed class SystemPulseForm : WidgetForm
         var scale = DeviceDpi / 96f;
         var top = 40 * scale;
         DrawUptime(graphics, new RectangleF(16 * scale, top, 150 * scale, 55 * scale), compact: false);
-        DrawMetric(graphics, new RectangleF(180 * scale, top, 78 * scale, 55 * scale), "CPU", Percent(_snapshot.CpuPercent), Temperature(_snapshot.CpuTemperatureC), _snapshot.CpuPercent);
-        DrawMetric(graphics, new RectangleF(270 * scale, top, 78 * scale, 55 * scale), "GPU", Percent(_snapshot.GpuPercent), Temperature(_snapshot.GpuTemperatureC), _snapshot.GpuPercent);
-        DrawMetric(graphics, new RectangleF(360 * scale, top, 88 * scale, 55 * scale), "MEMORY", Percent(_snapshot.MemoryPercent), $"{_snapshot.MemoryUsedGb:0.0} GB", _snapshot.MemoryPercent);
+        DrawLoadMetric(graphics, new RectangleF(180 * scale, top, 78 * scale, 55 * scale), "CPU", Percent(_snapshot.CpuPercent), Temperature(_snapshot.CpuTemperatureC), _snapshot.CpuPercent);
+        DrawLoadMetric(graphics, new RectangleF(270 * scale, top, 78 * scale, 55 * scale), "GPU", Percent(_snapshot.GpuPercent), Temperature(_snapshot.GpuTemperatureC), _snapshot.GpuPercent);
+        DrawLoadMetric(graphics, new RectangleF(360 * scale, top, 88 * scale, 55 * scale), "MEMORY", Percent(_snapshot.MemoryPercent), $"{_snapshot.MemoryUsedGb:0.0} GB", _snapshot.MemoryPercent);
         DrawDriveMetric(graphics, new RectangleF(462 * scale, top, 102 * scale, 55 * scale), _snapshot.Drives.FirstOrDefault(), compact: false);
     }
 
@@ -354,9 +380,9 @@ internal sealed class SystemPulseForm : WidgetForm
         var top = 42 * scale;
         var metricHeight = 62 * scale;
         DrawUptime(graphics, new RectangleF(16 * scale, top, 155 * scale, metricHeight), compact: false);
-        DrawMetric(graphics, new RectangleF(184 * scale, top, 86 * scale, metricHeight), "CPU", Percent(_snapshot.CpuPercent), Temperature(_snapshot.CpuTemperatureC), _snapshot.CpuPercent);
-        DrawMetric(graphics, new RectangleF(282 * scale, top, 86 * scale, metricHeight), "GPU", Percent(_snapshot.GpuPercent), Temperature(_snapshot.GpuTemperatureC), _snapshot.GpuPercent);
-        DrawMetric(graphics, new RectangleF(380 * scale, top, 100 * scale, metricHeight), "MEMORY", Percent(_snapshot.MemoryPercent), $"{_snapshot.MemoryUsedGb:0.0}/{_snapshot.MemoryTotalGb:0} GB", _snapshot.MemoryPercent);
+        DrawLoadMetric(graphics, new RectangleF(184 * scale, top, 86 * scale, metricHeight), "CPU", Percent(_snapshot.CpuPercent), Temperature(_snapshot.CpuTemperatureC), _snapshot.CpuPercent);
+        DrawLoadMetric(graphics, new RectangleF(282 * scale, top, 86 * scale, metricHeight), "GPU", Percent(_snapshot.GpuPercent), Temperature(_snapshot.GpuTemperatureC), _snapshot.GpuPercent);
+        DrawLoadMetric(graphics, new RectangleF(380 * scale, top, 100 * scale, metricHeight), "MEMORY", Percent(_snapshot.MemoryPercent), $"{_snapshot.MemoryUsedGb:0.0}/{_snapshot.MemoryTotalGb:0} GB", _snapshot.MemoryPercent);
         DrawDriveMetric(graphics, new RectangleF(494 * scale, top, 110 * scale, metricHeight), _snapshot.Drives.FirstOrDefault(), compact: false);
 
         var secondDrive = _snapshot.Drives.Skip(1).FirstOrDefault();
@@ -394,6 +420,12 @@ internal sealed class SystemPulseForm : WidgetForm
             var detailHeight = TextLineHeight(graphics, DetailFont, 2 * scale);
             DrawText(graphics, "days · hrs · min · sec", DetailFont, Muted, new RectangleF(area.X, valueTop + valueHeight, area.Width, detailHeight));
         }
+    }
+
+    private void DrawLoadMetric(Graphics graphics, RectangleF area, string label, string value, string? detail, double percent)
+    {
+        _taskManagerHitAreas.Add(Rectangle.Ceiling(area));
+        DrawMetric(graphics, area, label, value, detail, percent);
     }
 
     private void DrawMetric(Graphics graphics, RectangleF area, string label, string value, string? detail, double? percent, bool warning = false)

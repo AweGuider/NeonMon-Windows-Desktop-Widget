@@ -163,12 +163,11 @@ internal sealed class TelemetryService : IDisposable
 
     public static string SystemDrive => (Environment.GetEnvironmentVariable("SystemDrive") ?? "C:").TrimEnd('\\');
 
-    public static List<string> FixedDriveNames()
+    public static List<string> DriveNames()
     {
         try
         {
-            return DriveInfo.GetDrives().Where(drive => drive.DriveType == DriveType.Fixed && drive.IsReady)
-                .Select(drive => drive.Name.TrimEnd('\\')).ToList();
+            return ReadyDrives().Select(drive => drive.Name.TrimEnd('\\')).ToList();
         }
         catch
         {
@@ -176,17 +175,28 @@ internal sealed class TelemetryService : IDisposable
         }
     }
 
+    // Fixed drives come first so the open panel's main drive slots stay the same when a USB stick is plugged in.
+    private static IEnumerable<DriveInfo> ReadyDrives() => DriveInfo.GetDrives()
+        .Where(drive => (drive.DriveType is DriveType.Fixed or DriveType.Removable) && drive.IsReady)
+        .OrderBy(drive => drive.DriveType == DriveType.Fixed ? 0 : 1);
+
     private static IReadOnlyList<DriveMetric> ReadDrives()
     {
         var result = new List<DriveMetric>();
         try
         {
-            foreach (var drive in DriveInfo.GetDrives().Where(drive => drive.DriveType == DriveType.Fixed && drive.IsReady))
+            foreach (var drive in ReadyDrives())
             {
-                result.Add(new DriveMetric(
-                    drive.Name.TrimEnd('\\'),
-                    drive.AvailableFreeSpace / 1024d / 1024d / 1024d,
-                    drive.TotalSize == 0 ? 0 : 100d * drive.AvailableFreeSpace / drive.TotalSize));
+                try
+                {
+                    result.Add(new DriveMetric(
+                        drive.Name.TrimEnd('\\'),
+                        drive.AvailableFreeSpace / 1024d / 1024d / 1024d,
+                        drive.TotalSize == 0 ? 0 : 100d * drive.AvailableFreeSpace / drive.TotalSize));
+                }
+                catch (IOException)
+                {
+                }
             }
         }
         catch

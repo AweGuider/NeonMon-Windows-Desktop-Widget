@@ -433,7 +433,7 @@ internal sealed class NeonMonContext : ApplicationContext
             return;
         }
 
-        _settingsDrives = TelemetryService.FixedDriveNames();
+        _settingsDrives = TelemetryService.DriveNames();
         RefreshStartupState();
         _settingsForm = new SettingsForm(BuildSettingsPages, _trayIcon);
         _settingsForm.Show();
@@ -444,7 +444,7 @@ internal sealed class NeonMonContext : ApplicationContext
     {
         _sampleStatusLine = sampleStatusLine;
         _settingsDrives = sampleStatusLine is null
-            ? TelemetryService.FixedDriveNames()
+            ? TelemetryService.DriveNames()
             : TelemetrySnapshot.Sample.Drives.Select(drive => drive.Name).ToList();
         if (sampleStatusLine is null)
         {

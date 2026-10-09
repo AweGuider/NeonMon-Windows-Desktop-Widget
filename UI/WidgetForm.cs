@@ -15,6 +15,8 @@ internal abstract class WidgetForm : Form
     protected static readonly Color Muted = Color.FromArgb(104, 147, 157);
     protected static readonly Color Track = Color.FromArgb(30, 91, 117, 126);
     protected static readonly Color Warning = Color.FromArgb(255, 173, 84);
+    protected static readonly Color Critical = Color.FromArgb(255, 92, 122);
+    protected static readonly Color StripTrack = Color.FromArgb(70, 91, 117, 126);
     private static readonly Color HiddenRing = Color.FromArgb(205, 222, 226);
     private static readonly Color HiddenBody = Color.FromArgb(6, 15, 20);
 
@@ -158,6 +160,8 @@ internal abstract class WidgetForm : Form
     private bool IsMenuVisible => ContextMenuStrip?.Visible == true;
 
     protected abstract string Title { get; }
+
+    protected const int TwoLineTabThickness = 16;
 
     protected virtual Size GetLogicalHiddenSize(bool horizontal) => horizontal ? new Size(132, 9) : new Size(9, 132);
 
@@ -806,6 +810,14 @@ internal abstract class WidgetForm : Form
         return IsHorizontal
             ? new RectangleF(body.Left + inset, body.Top + (body.Height - thickness) / 2f, body.Width - 2 * inset, thickness)
             : new RectangleF(body.Left + (body.Width - thickness) / 2f, body.Top + inset, thickness, body.Height - 2 * inset);
+    }
+
+    // The two-line tab gave up one pixel on the screen-edge side, so its bars keep their distance from the exposed ring.
+    protected RectangleF ShiftTowardEdge(RectangleF core, float amount)
+    {
+        core.Offset(Settings.DockEdge switch { DockEdge.Left => -amount, DockEdge.Right => amount, _ => 0 },
+            Settings.DockEdge switch { DockEdge.Top => -amount, DockEdge.Bottom => amount, _ => 0 });
+        return core;
     }
 
     protected static void FillPill(Graphics graphics, Color color, RectangleF bounds)

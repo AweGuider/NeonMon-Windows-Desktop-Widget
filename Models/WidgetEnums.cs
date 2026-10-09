@@ -46,6 +46,14 @@ internal enum MenuStyle
     Dark
 }
 
+internal enum HiddenMetric
+{
+    Cpu,
+    Gpu,
+    Memory,
+    Drive
+}
+
 [Flags]
 internal enum PeekValues
 {

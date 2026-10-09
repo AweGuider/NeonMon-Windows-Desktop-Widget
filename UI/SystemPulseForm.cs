@@ -17,6 +17,7 @@ internal sealed class SystemPulseForm : WidgetForm
     private readonly List<Rectangle> _taskManagerHitAreas = [];
     private Rectangle _uptimeArea;
     private TelemetrySnapshot _snapshot = TelemetrySnapshot.Empty;
+    private IReadOnlyList<double> _hiddenValues = [];
     private Font _peekFont = null!;
 
     public SystemPulseForm(AppSettings settings, Action saveSettings, TelemetryService telemetry)
@@ -25,11 +26,120 @@ internal sealed class SystemPulseForm : WidgetForm
         _settings = settings;
         _telemetry = telemetry;
         _telemetry.SnapshotUpdated += HandleSnapshot;
+        _telemetry.HiddenMetricsUpdated += HandleHiddenMetrics;
         _telemetry.SetActive(false);
         _telemetry.SetPeekTemperatures(ShowsTemperature);
     }
 
     protected override string Title => "SYSTEM PULSE";
+
+    internal void HiddenMetricsChanged()
+    {
+        _hiddenValues = [];
+        ApplyHiddenMetrics();
+        ContentSizeChanged();
+    }
+
+    private void ApplyHiddenMetrics() =>
+        _telemetry.SetHiddenMetrics(Visible && Settings.Enabled ? _settings.HiddenMetrics : [], _settings.HiddenMetricSeconds);
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        ApplyHiddenMetrics();
+    }
+
+    private void HandleHiddenMetrics(IReadOnlyList<double> values)
+    {
+        if (IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        BeginInvoke(new Action(() =>
+        {
+            _hiddenValues = values;
+            if (State == RevealState.Hidden)
+            {
+                Invalidate();
+            }
+        }));
+    }
+
+    protected override Size GetLogicalHiddenSize(bool horizontal)
+    {
+        var count = _settings.HiddenMetrics.Count;
+        if (count == 0)
+        {
+            return base.GetLogicalHiddenSize(horizontal);
+        }
+
+        var thickness = count == 1 ? 9 : TwoLineTabThickness;
+        return horizontal ? new Size(132, thickness) : new Size(thickness, 132);
+    }
+
+    // One metric fills the 9 px tab; two use the two-line tab with the first metric on the inner line.
+    protected override void DrawHidden(Graphics graphics)
+    {
+        var metrics = _settings.HiddenMetrics;
+        if (metrics.Count == 0)
+        {
+            base.DrawHidden(graphics);
+            return;
+        }
+
+        if (metrics.Count == 1)
+        {
+            DrawMetricBar(graphics, DrawHiddenTab(graphics, 3.5f), metrics[0], HiddenValue(0));
+            return;
+        }
+
+        var scale = DeviceDpi / 96f;
+        var outer = 4.5f * scale;
+        var gap = 1.5f * scale;
+        var inner = 3.5f * scale;
+        var core = ShiftTowardEdge(DrawHiddenTab(graphics, (outer + gap + inner) / scale), 0.5f * scale);
+        var outerOnFarSide = Settings.DockEdge is DockEdge.Bottom or DockEdge.Right;
+        RectangleF Across(float offset, float thickness) => IsHorizontal
+            ? new RectangleF(core.Left, core.Top + offset, core.Width, thickness)
+            : new RectangleF(core.Left + offset, core.Top, thickness, core.Height);
+        DrawMetricBar(graphics, Across(outerOnFarSide ? 0 : outer + gap, inner), metrics[0], HiddenValue(0));
+        DrawMetricBar(graphics, Across(outerOnFarSide ? inner + gap : 0, outer), metrics[1], HiddenValue(1));
+    }
+
+    // Until the first average arrives, the last full snapshot stands in.
+    private double HiddenValue(int index)
+    {
+        if (index < _hiddenValues.Count)
+        {
+            return _hiddenValues[index];
+        }
+
+        return _settings.HiddenMetrics[index] switch
+        {
+            HiddenMetric.Cpu => _snapshot.CpuPercent,
+            HiddenMetric.Gpu => _snapshot.GpuPercent,
+            HiddenMetric.Memory => _snapshot.MemoryPercent,
+            _ => _snapshot.Drives.FirstOrDefault(drive => drive.Name.Equals(TelemetryService.SystemDrive, StringComparison.OrdinalIgnoreCase)) is { } drive
+                ? 100 - drive.FreePercent
+                : 0
+        };
+    }
+
+    // Side docks fill from the bottom up, like a level.
+    private void DrawMetricBar(Graphics graphics, RectangleF bar, HiddenMetric metric, double percent)
+    {
+        FillPill(graphics, StripTrack, bar);
+        var fraction = (float)Math.Clamp(percent / 100d, 0, 1);
+        var fill = IsHorizontal
+            ? new RectangleF(bar.Left, bar.Top, Math.Max(bar.Height, bar.Width * fraction), bar.Height)
+            : new RectangleF(bar.Left, bar.Bottom - Math.Max(bar.Width, bar.Height * fraction), bar.Width, Math.Max(bar.Width, bar.Height * fraction));
+        FillPill(graphics, MetricColor(metric, percent), fill);
+    }
+
+    private static Color MetricColor(HiddenMetric metric, double percent) => metric == HiddenMetric.Drive
+        ? percent >= 95 ? Critical : percent >= 85 ? Warning : Cyan
+        : percent >= 90 ? Critical : percent >= 75 ? Warning : Cyan;
 
     internal void SetSnapshot(TelemetrySnapshot snapshot)
     {
@@ -512,6 +622,7 @@ internal sealed class SystemPulseForm : WidgetForm
         if (disposing)
         {
             _telemetry.SnapshotUpdated -= HandleSnapshot;
+            _telemetry.HiddenMetricsUpdated -= HandleHiddenMetrics;
             _peekFont?.Dispose();
         }
 

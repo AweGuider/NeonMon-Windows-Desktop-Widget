@@ -20,6 +20,10 @@ internal sealed class AppSettings : StripSettings
     public MenuStyle MenuStyle { get; set; } = MenuStyle.Windows;
     public PeekValues Peek { get; set; } = PeekValues.Cpu | PeekValues.Gpu | PeekValues.Memory;
     public List<string>? PeekDrives { get; set; }
+    public List<HiddenMetric> HiddenMetrics { get; set; } = [];
+    public int HiddenMetricSeconds { get; set; } = 15;
+
+    public static int[] HiddenMetricSecondsChoices { get; } = [1, 5, 15, 30];
     public QuotaSettings? Quota { get; set; }
 }
 
@@ -30,6 +34,7 @@ internal sealed class QuotaSettings : StripSettings
     public bool ClaudeEndpointFallback { get; set; }
     public QuotaDisplay Display { get; set; } = QuotaDisplay.Remaining;
     public HiddenTabStyle HiddenTab { get; set; } = HiddenTabStyle.TwoLines;
+    public bool PeekResetWhenLow { get; set; } = true;
     public string ClaudeCliDirectory { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     public string CodexCliDirectory { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     public int ClaudeActiveRefreshMinutes { get; set; } = ActiveRefreshChoices[0];

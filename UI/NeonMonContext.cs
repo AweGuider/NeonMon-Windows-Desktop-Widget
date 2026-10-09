@@ -485,6 +485,8 @@ internal sealed class NeonMonContext : ApplicationContext
             new ChoiceRow("Show quota as", ["Remaining", "Used"], () => (int)_quotaSettings.Display, index => SetQuotaDisplay((QuotaDisplay)index)),
             new ChoiceRow("Hidden tab", ["Two lines", "One line"], () => (int)_quotaSettings.HiddenTab, index => SetHiddenTab((HiddenTabStyle)index),
                 "Two lines: weekly outside, 5-hour inside. One line: the tighter limit."),
+            new ToggleRow("Reset time when low", () => _quotaSettings.PeekResetWhenLow, SetPeekResetWhenLow,
+                "Peek adds the reset time at 10% or less. At 0% it always shows."),
             new SectionRow("Claude"),
             new ToggleRow("Show Claude", () => _quotaSettings.ShowClaude, on => SetProviderShown(QuotaProvider.Claude, on)),
             new ActionRow("Status line data", StatusLineStatus, "Copy setting", CopyStatusLineSetting,
@@ -600,6 +602,15 @@ internal sealed class NeonMonContext : ApplicationContext
         var drives = _settingsDrives.Union(chosen, StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase);
         return
         [
+            new SectionRow("Hidden tab", "Up to two. The first one you pick is the inner line."),
+            HiddenMetricRow("CPU load", HiddenMetric.Cpu),
+            HiddenMetricRow("GPU load", HiddenMetric.Gpu),
+            HiddenMetricRow("Memory", HiddenMetric.Memory),
+            HiddenMetricRow($"Drive {TelemetryService.SystemDrive} used", HiddenMetric.Drive),
+            new ChoiceRow("Average over", [.. AppSettings.HiddenMetricSecondsChoices.Select(seconds => $"{seconds} s")],
+                () => Math.Max(0, Array.IndexOf(AppSettings.HiddenMetricSecondsChoices, _settings.HiddenMetricSeconds)),
+                index => SetHiddenMetricSeconds(AppSettings.HiddenMetricSecondsChoices[index]),
+                "Samples once a second while the tab is hidden."),
             new SectionRow("Peek"),
             PeekValueRow("CPU load", PeekValues.Cpu),
             PeekValueRow("CPU temperature", PeekValues.CpuTemperature, "Needs a supported sensor (MSI today)."),
@@ -610,6 +621,34 @@ internal sealed class NeonMonContext : ApplicationContext
                 on => SetPeekDrive(drive, on), _settingsDrives.Contains(drive, StringComparer.OrdinalIgnoreCase) ? null : "Not found.")),
             PeekValueRow("Uptime", PeekValues.Uptime, "Since the last power-on or wake.")
         ];
+    }
+
+    private ToggleRow HiddenMetricRow(string label, HiddenMetric metric, string? hint = null) =>
+        new(label, () => _settings.HiddenMetrics.Contains(metric), on => SetHiddenMetric(metric, on), hint);
+
+    private void SetHiddenMetric(HiddenMetric metric, bool on)
+    {
+        if (on && !_settings.HiddenMetrics.Contains(metric) && _settings.HiddenMetrics.Count >= 2)
+        {
+            ShowNotice("The hidden tab shows up to two metrics.");
+            return;
+        }
+
+        _settings.HiddenMetrics.Remove(metric);
+        if (on)
+        {
+            _settings.HiddenMetrics.Add(metric);
+        }
+
+        SaveSettings();
+        SystemForm.HiddenMetricsChanged();
+    }
+
+    private void SetHiddenMetricSeconds(int seconds)
+    {
+        _settings.HiddenMetricSeconds = seconds;
+        SaveSettings();
+        SystemForm.HiddenMetricsChanged();
     }
 
     private ToggleRow PeekValueRow(string label, PeekValues value, string? hint = null) =>
@@ -871,6 +910,13 @@ internal sealed class NeonMonContext : ApplicationContext
 
         SaveSettings();
         _quota.RequestRefresh();
+    }
+
+    private void SetPeekResetWhenLow(bool enabled)
+    {
+        _quotaSettings.PeekResetWhenLow = enabled;
+        SaveSettings();
+        QuotaForm.RefreshDisplay();
     }
 
     private void SetHiddenTab(HiddenTabStyle style)

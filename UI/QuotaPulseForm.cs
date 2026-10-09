@@ -12,11 +12,11 @@ internal sealed class QuotaPulseForm : WidgetForm
     private const float PeekSeparator = 18;
     private const float PeekCharWidth = 8.2f;
     private const float ChipGap = 5;
+    private const float CountdownGap = 4;
 
     private static readonly Color ClaudeTint = Color.FromArgb(217, 119, 87);
     private static readonly Color CodexTint = Color.FromArgb(237, 237, 237);
-    private static readonly Color Critical = Color.FromArgb(255, 92, 122);
-    private static readonly Color StripTrack = Color.FromArgb(70, 91, 117, 126);
+    private static readonly Color ExhaustedText = Color.FromArgb(170, 70, 84);
 
     private readonly QuotaSettings _quotaSettings;
     private Font _peekFont = null!;
@@ -189,7 +189,7 @@ internal sealed class QuotaPulseForm : WidgetForm
     // One provider keeps the same bar length as each half of the two-provider tab.
     protected override Size GetLogicalHiddenSize(bool horizontal)
     {
-        var thickness = TwoLines ? 17 : 9;
+        var thickness = TwoLines ? TwoLineTabThickness : 9;
         var length = VisibleQuotas.Length == 2 ? 132 : 68;
         return horizontal ? new Size(length, thickness) : new Size(thickness, length);
     }
@@ -227,9 +227,11 @@ internal sealed class QuotaPulseForm : WidgetForm
     private static float PeekTextWidth(string text) => text.Length * PeekCharWidth;
 
     private static float PeekBlockWidth(PeekItem item) =>
-        PeekIcon + PeekIconGap + PeekTextWidth(item.Primary) + (item.Chip is null ? 0 : ChipGap + PeekTextWidth(item.Chip) + 10);
+        PeekIcon + PeekIconGap + PeekTextWidth(item.Primary) + (item.Chip is null ? 0 : ChipGap + PeekTextWidth(item.Chip) + 10)
+        + (item.Countdown is null ? 0 : CountdownGap + PeekTextWidth(item.Countdown));
 
-    private static float PeekBlockHeight(PeekItem item) => 14 + 3 + 16 + (item.Chip is null ? 0 : 4 + 17);
+    private static float PeekBlockHeight(PeekItem item) => 14 + 3 + 16 + (item.Chip is null ? 0 : 4 + 17)
+        + (item.Countdown is null ? 0 : 15) + (item.Chip?.Contains(' ') == true ? 15 : 0);
 
     private PeekItem GetPeekItem(ProviderQuota quota, DateTimeOffset now)
     {
@@ -244,13 +246,39 @@ internal sealed class QuotaPulseForm : WidgetForm
             : StatusColor(primary.Remaining(now)) == Cyan
                 ? quota.UseItOrLoseIt(now) ? Ice : Foreground
                 : StatusColor(primary.Remaining(now));
-        var chip = quota.WeeklyRunsOutFirst(now) ? FormatPercent(quota.Weekly!, now) : null;
-        return new PeekItem(FormatPercent(primary, now), color, chip);
+        var stale = quota.IsStale(now);
+        var chip = quota.WeeklyRunsOutFirst(now) ? WithReset(FormatPercent(quota.Weekly!, now), quota.Weekly!, now) : null;
+        if (!ShowsReset(primary, now))
+        {
+            return new PeekItem(FormatPercent(primary, now), color, chip);
+        }
+
+        var exhausted = IsExhausted(primary, now);
+        return new PeekItem(FormatPercent(primary, now), exhausted && !stale ? ExhaustedText : color, chip,
+            PeekSpan(primary.TimeLeft(now)), exhausted && !stale ? Foreground : Muted);
+    }
+
+    // At 0% the reset time always shows; from 1% to 10% it follows the setting.
+    private bool ShowsReset(QuotaWindow window, DateTimeOffset now) =>
+        window.ResetsAt is not null && !window.HasReset(now)
+        && (IsExhausted(window, now) || (window.Remaining(now) <= 10 && _quotaSettings.PeekResetWhenLow));
+
+    private string WithReset(string text, QuotaWindow window, DateTimeOffset now) =>
+        ShowsReset(window, now) ? $"{text} {PeekSpan(window.TimeLeft(now))}" : text;
+
+    private static string PeekSpan(TimeSpan? span)
+    {
+        var value = span ?? TimeSpan.Zero;
+        return value.TotalHours < 1 ? $"{Math.Max(0, (int)value.TotalMinutes)}m"
+            : value.TotalDays < 1 ? $"{(int)value.TotalHours}h{value.Minutes:00}"
+            : $"{(int)value.TotalDays}d{value.Hours}h";
     }
 
     private string FormatPercent(QuotaWindow window, DateTimeOffset now) => $"{DisplayValue(window, now):0}%";
 
     private double DisplayValue(QuotaWindow window, DateTimeOffset now) => ShowRemaining ? window.Remaining(now) : window.Used(now);
+
+    private static bool IsExhausted(QuotaWindow window, DateTimeOffset now) => Math.Round(window.Remaining(now), MidpointRounding.AwayFromZero) <= 0;
 
     private static Color StatusColor(double remaining) => remaining < 10 ? Critical : remaining <= 25 ? Warning : Cyan;
 
@@ -266,7 +294,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         var weeklyThickness = 4.5f * scale;
         var lineGap = 1.5f * scale;
         var fiveHourThickness = 3.5f * scale;
-        var core = DrawHiddenTab(graphics, (weeklyThickness + lineGap + fiveHourThickness) / scale);
+        var core = ShiftTowardEdge(DrawHiddenTab(graphics, (weeklyThickness + lineGap + fiveHourThickness) / scale), 0.5f * scale);
         var now = Clock();
         var length = IsHorizontal ? core.Width : core.Height;
         var circle = 8.5f * scale;
@@ -333,6 +361,12 @@ internal sealed class QuotaPulseForm : WidgetForm
         }
 
         var remaining = window.Remaining(now);
+        if (ShowRemaining && IsExhausted(window, now))
+        {
+            FillAlong(graphics, core, Color.FromArgb(quota.IsStale(now) ? 60 : 120, Critical), start, length, 1);
+            return;
+        }
+
         var color = pulsing ? Ice : StatusColor(remaining);
         var alpha = quota.IsStale(now) ? 110 : pulsing && !_pulseOn ? 140 : 255;
         var fraction = (float)Math.Clamp(DisplayValue(window, now) / 100d, 0, 1);
@@ -424,6 +458,11 @@ internal sealed class QuotaPulseForm : WidgetForm
     {
         var scale = DeviceDpi / 96f;
         var width = (PeekIcon + PeekIconGap) * scale + MeasureText(graphics, item.Primary, _peekFont);
+        if (item.Countdown is not null)
+        {
+            width += CountdownGap * scale + MeasureText(graphics, item.Countdown, _peekFont);
+        }
+
         if (item.Chip is not null)
         {
             width += ChipGap * scale + MeasureText(graphics, item.Chip, _peekFont) + 8 * scale;
@@ -440,6 +479,14 @@ internal sealed class QuotaPulseForm : WidgetForm
         var textHeight = TextLineHeight(graphics, _peekFont, 0);
         var textWidth = MeasureText(graphics, item.Primary, _peekFont);
         DrawText(graphics, item.Primary, _peekFont, item.Color, new RectangleF(x, centerY - textHeight / 2f, textWidth + 2, textHeight));
+        if (item.Countdown is not null)
+        {
+            var countdownWidth = MeasureText(graphics, item.Countdown, _peekFont);
+            DrawText(graphics, item.Countdown, _peekFont, item.CountdownColor,
+                new RectangleF(x + textWidth + CountdownGap * scale, centerY - textHeight / 2f, countdownWidth + 2, textHeight));
+            textWidth += CountdownGap * scale + countdownWidth;
+        }
+
         if (item.Chip is not null)
         {
             DrawWeeklyChip(graphics, item.Chip, x + textWidth + ChipGap * scale, centerY);
@@ -456,11 +503,26 @@ internal sealed class QuotaPulseForm : WidgetForm
         var textWidth = MeasureText(graphics, item.Primary, _peekFont);
         DrawText(graphics, item.Primary, _peekFont, item.Color, new RectangleF(centerX - textWidth / 2f, y, textWidth + 2, textHeight));
         y += 16 * scale;
+        if (item.Countdown is not null)
+        {
+            var countdownWidth = MeasureText(graphics, item.Countdown, _peekFont);
+            DrawText(graphics, item.Countdown, _peekFont, item.CountdownColor, new RectangleF(centerX - countdownWidth / 2f, y - scale, countdownWidth + 2, textHeight));
+            y += 15 * scale;
+        }
+
         if (item.Chip is not null)
         {
-            var chipWidth = MeasureText(graphics, item.Chip, _peekFont) + 8 * scale;
-            DrawWeeklyChip(graphics, item.Chip, centerX - chipWidth / 2f, y + 4 * scale + 8.5f * scale);
+            // The side column is too narrow for "3% 2d3h", so the chip's reset time goes underneath.
+            var parts = item.Chip.Split(' ', 2);
+            var chipWidth = MeasureText(graphics, parts[0], _peekFont) + 8 * scale;
+            DrawWeeklyChip(graphics, parts[0], centerX - chipWidth / 2f, y + 4 * scale + 8.5f * scale);
             y += 21 * scale;
+            if (parts.Length == 2)
+            {
+                var resetWidth = MeasureText(graphics, parts[1], _peekFont);
+                DrawText(graphics, parts[1], _peekFont, Color.FromArgb(200, Warning), new RectangleF(centerX - resetWidth / 2f, y, resetWidth + 2, textHeight));
+                y += 15 * scale;
+            }
         }
 
         return y;
@@ -947,5 +1009,5 @@ internal sealed class QuotaPulseForm : WidgetForm
         base.Dispose(disposing);
     }
 
-    private sealed record PeekItem(string Primary, Color Color, string? Chip);
+    private sealed record PeekItem(string Primary, Color Color, string? Chip, string? Countdown = null, Color CountdownColor = default);
 }

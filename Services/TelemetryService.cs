@@ -22,6 +22,12 @@ internal sealed class TelemetryService : IDisposable
     private double _topProcessCpu;
     private DateTimeOffset? _lastGpuTimeout;
     private string? _gpuTimeoutCode;
+    private volatile HiddenMetric[] _hiddenMetrics = [];
+    private volatile int _hiddenSeconds = 15;
+    private volatile bool _hiddenRestart = true;
+    private double[] _hiddenSums = [];
+    private int _hiddenCount;
+    private double _hiddenDriveUsed;
 
     public TelemetryService()
     {
@@ -33,6 +39,9 @@ internal sealed class TelemetryService : IDisposable
 
     public event Action<TelemetrySnapshot>? SnapshotUpdated;
 
+    // Averages of the chosen hidden-tab metrics, in the order they were chosen.
+    public event Action<IReadOnlyList<double>>? HiddenMetricsUpdated;
+
     public void SetActive(bool active)
     {
         var activated = active && !_active;
@@ -42,6 +51,10 @@ internal sealed class TelemetryService : IDisposable
             _topProcessCountdown = 0;
             Wake();
         }
+        else if (!active)
+        {
+            RestartHiddenMetrics();
+        }
     }
 
     public void SetPeeking(bool peeking)
@@ -49,6 +62,27 @@ internal sealed class TelemetryService : IDisposable
         var started = peeking && !_peeking;
         _peeking = peeking;
         if (started)
+        {
+            Wake();
+        }
+        else if (!peeking)
+        {
+            RestartHiddenMetrics();
+        }
+    }
+
+    // While the strip is hidden only these metrics are sampled, once a second, and averaged over the interval.
+    public void SetHiddenMetrics(IReadOnlyList<HiddenMetric> metrics, int seconds)
+    {
+        _hiddenMetrics = [.. metrics.Take(2)];
+        _hiddenSeconds = Math.Max(1, seconds);
+        RestartHiddenMetrics();
+    }
+
+    private void RestartHiddenMetrics()
+    {
+        _hiddenRestart = true;
+        if (_hiddenMetrics.Length > 0)
         {
             Wake();
         }
@@ -89,9 +123,11 @@ internal sealed class TelemetryService : IDisposable
 
     private async Task SampleLoopAsync()
     {
+        long nextBackgroundCapture = 0;
         while (!_cancellation.IsCancellationRequested)
         {
-            if (_active || _peeking || _background)
+            var hidden = !_active && !_peeking && _hiddenMetrics.Length > 0;
+            if (_active || _peeking || (_background && Environment.TickCount64 >= nextBackgroundCapture))
             {
                 try
                 {
@@ -102,11 +138,24 @@ internal sealed class TelemetryService : IDisposable
                 catch
                 {
                 }
+
+                nextBackgroundCapture = Environment.TickCount64 + 4500;
+            }
+
+            if (hidden)
+            {
+                try
+                {
+                    SampleHiddenMetrics();
+                }
+                catch
+                {
+                }
             }
 
             try
             {
-                var delay = _active || _peeking ? 1000 : _background ? 5000 : Timeout.Infinite;
+                var delay = _active || _peeking || hidden ? 1000 : _background ? 5000 : Timeout.Infinite;
                 await _wake.WaitAsync(delay, _cancellation.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -159,6 +208,60 @@ internal sealed class TelemetryService : IDisposable
             LastGpuTimeout = _lastGpuTimeout,
             GpuTimeoutCode = _gpuTimeoutCode
         };
+    }
+
+    // The first sample after a restart is published at once so the tab never waits a whole interval.
+    private void SampleHiddenMetrics()
+    {
+        var metrics = _hiddenMetrics;
+        var publish = false;
+        if (_hiddenRestart || _hiddenSums.Length != metrics.Length)
+        {
+            _hiddenRestart = false;
+            _hiddenSums = new double[metrics.Length];
+            _hiddenCount = 0;
+            publish = true;
+        }
+
+        for (var index = 0; index < metrics.Length; index++)
+        {
+            _hiddenSums[index] += ReadHiddenMetric(metrics[index]);
+        }
+
+        _hiddenCount++;
+        if (!publish && _hiddenCount < _hiddenSeconds)
+        {
+            return;
+        }
+
+        var averages = _hiddenSums.Select(sum => sum / _hiddenCount).ToList();
+        _hiddenSums = new double[metrics.Length];
+        _hiddenCount = 0;
+        HiddenMetricsUpdated?.Invoke(averages);
+    }
+
+    private double ReadHiddenMetric(HiddenMetric metric)
+    {
+        switch (metric)
+        {
+            case HiddenMetric.Cpu:
+                return _cpu.Read();
+            case HiddenMetric.Gpu:
+                return _nvml.Read().Utilization;
+            case HiddenMetric.Memory:
+                var memory = new NativeMethods.MemoryStatusEx();
+                NativeMethods.GlobalMemoryStatusEx(memory);
+                return memory.TotalPhysical == 0 ? 0 : 100d * (memory.TotalPhysical - memory.AvailablePhysical) / memory.TotalPhysical;
+            default:
+                // Disk fullness changes slowly, so it is read once per interval.
+                if (_hiddenCount == 0)
+                {
+                    var drive = new DriveInfo(SystemDrive);
+                    _hiddenDriveUsed = drive.TotalSize == 0 ? 0 : 100d * (drive.TotalSize - drive.AvailableFreeSpace) / drive.TotalSize;
+                }
+
+                return _hiddenDriveUsed;
+        }
     }
 
     public static string SystemDrive => (Environment.GetEnvironmentVariable("SystemDrive") ?? "C:").TrimEnd('\\');

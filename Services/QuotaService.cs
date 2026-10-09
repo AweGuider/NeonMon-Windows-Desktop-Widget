@@ -10,6 +10,9 @@ internal sealed class QuotaService : IDisposable
 
     private static readonly TimeSpan EndpointRefreshWhileOpen = TimeSpan.FromMinutes(2);
 
+    private static readonly TimeSpan CodexMergeHorizon = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan ResetJitter = TimeSpan.FromMinutes(2);
+
     private readonly Func<bool> _claudeEndpointEnabled;
     private readonly ClaudeStatuslineReader _claude = new();
     private readonly ClaudeUsageEndpoint _claudeEndpoint = new();
@@ -192,22 +195,45 @@ internal sealed class QuotaService : IDisposable
         };
     }
 
-    private static ProviderQuota MergeCodex(ProviderQuota? session, ProviderQuota? appServer)
+    // Parallel Codex sessions each log the limits from their own last response, so a newer line can carry an older,
+    // lower value. Within one window usage only grows, so the highest recent value wins. Snapshots older than the
+    // horizon are dropped, which lets a genuine mid-window reset show once stale sessions age out.
+    internal static ProviderQuota MergeCodex(IReadOnlyList<ProviderQuota> sessions, ProviderQuota? appServer)
     {
-        if (session is null && appServer is null)
+        IReadOnlyList<ProviderQuota> all = appServer is null ? sessions : [.. sessions, appServer];
+        if (all.Count == 0)
         {
             return new ProviderQuota { Provider = QuotaProvider.Codex };
         }
 
-        var newest = session is null || (appServer is not null && appServer.CapturedAt > session.CapturedAt)
-            ? appServer!
-            : session;
+        var newest = all.MaxBy(quota => quota.CapturedAt ?? DateTimeOffset.MinValue)!;
+        var horizon = (newest.CapturedAt ?? DateTimeOffset.MinValue) - CodexMergeHorizon;
+        var recent = all
+            .Where(quota => ReferenceEquals(quota, newest) || quota.CapturedAt >= horizon)
+            .OrderByDescending(quota => quota.CapturedAt)
+            .ToList();
         return newest with
         {
-            Plan = newest.Plan ?? session?.Plan ?? appServer?.Plan,
+            Plan = newest.Plan ?? recent.Select(quota => quota.Plan).FirstOrDefault(plan => plan is not null),
+            FiveHour = MergeWindow(recent.Select(quota => quota.FiveHour)),
+            Weekly = MergeWindow(recent.Select(quota => quota.Weekly)),
             ResetCreditCount = appServer?.ResetCreditCount ?? 0,
             ResetCredits = appServer?.ResetCredits ?? []
         };
+    }
+
+    private static QuotaWindow? MergeWindow(IEnumerable<QuotaWindow?> windows)
+    {
+        var list = windows.OfType<QuotaWindow>().ToList();
+        var latestReset = list.Where(window => window.ResetsAt is not null).MaxBy(window => window.ResetsAt);
+        if (latestReset is null)
+        {
+            return list.FirstOrDefault();
+        }
+
+        return list
+            .Where(window => window.ResetsAt is { } resetsAt && (latestReset.ResetsAt!.Value - resetsAt).Duration() <= ResetJitter)
+            .MaxBy(window => window.UsedPercent);
     }
 
     public void Dispose()

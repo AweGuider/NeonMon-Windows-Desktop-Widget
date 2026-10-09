@@ -127,6 +127,11 @@ internal static class Program
                     return 4;
                 }
 
+                if (!SelfTestCodexMerge())
+                {
+                    return 6;
+                }
+
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
                 var json = client.GetStringAsync($"http://127.0.0.1:{bridge.Port}/api/v1/metrics").GetAwaiter().GetResult();
                 using var document = JsonDocument.Parse(json);
@@ -233,6 +238,29 @@ internal static class Program
 
         var snapshot = quota.RefreshAllAsync().GetAwaiter().GetResult();
         return parsedCorrectly && snapshot.ClaudeEndpointRequests == 0;
+    }
+
+    private static bool SelfTestCodexMerge()
+    {
+        var now = new DateTimeOffset(2026, 10, 8, 17, 36, 0, TimeSpan.Zero);
+        var reset = now.AddHours(2);
+        ProviderQuota Session(double used, int secondsAgo, DateTimeOffset resetsAt) => new()
+        {
+            Provider = QuotaProvider.Codex,
+            FiveHour = new QuotaWindow(used, resetsAt, 300),
+            Source = "session log",
+            CapturedAt = now.AddSeconds(-secondsAgo)
+        };
+
+        var staleLater = QuotaService.MergeCodex([Session(99, 60, reset), Session(95, 10, reset.AddSeconds(40))], null);
+        var afterReset = QuotaService.MergeCodex([Session(28, 900, reset), Session(1, 10, reset)], null);
+        var newWindow = QuotaService.MergeCodex([Session(99, 120, reset), Session(3, 10, reset.AddHours(5))], null);
+        var exhausted = QuotaService.MergeCodex([Session(99, 600, reset)], Session(100, 0, reset) with { Source = "app-server" });
+
+        return staleLater.FiveHour?.UsedPercent == 99
+            && afterReset.FiveHour?.UsedPercent == 1
+            && newWindow.FiveHour?.UsedPercent == 3
+            && exhausted.FiveHour?.UsedPercent == 100 && exhausted.Source == "app-server";
     }
 
     private static string? ArgumentValue(string[] args, string name)

@@ -678,7 +678,10 @@ internal sealed class QuotaPulseForm : WidgetForm
         var color = StatusColor(window.Remaining(now));
         using var fill = new SolidBrush(quota.IsStale(now) ? Color.FromArgb(110, color) : color);
         var fraction = (float)Math.Clamp(DisplayValue(window, now) / 100d, 0, 1);
-        graphics.FillRectangle(fill, track.X, track.Y, Math.Max(2, track.Width * fraction), track.Height);
+        if (Math.Round(DisplayValue(window, now), MidpointRounding.AwayFromZero) > 0)
+        {
+            graphics.FillRectangle(fill, track.X, track.Y, Math.Max(2, track.Width * fraction), track.Height);
+        }
 
         if (window.TimeLeftFraction(now) is { } timeLeft)
         {

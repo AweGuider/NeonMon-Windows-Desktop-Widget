@@ -8,74 +8,73 @@ internal sealed class CodexSessionReader
 {
     private const int InitialTail = 256 * 1024;
     private const int MaxTail = 4 * 1024 * 1024;
+    private const int DayFolders = 7;
 
     private static readonly string SessionsRoot = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
 
-    private string? _path;
-    private long _length;
-    private DateTime _lastWrite;
-    private ProviderQuota? _latest;
+    private readonly Dictionary<string, (long Length, ProviderQuota? Quota)> _files = new(StringComparer.OrdinalIgnoreCase);
 
-    public ProviderQuota? Read()
+    // The latest snapshot of every recent session. Sessions run in parallel and a thread stays in the day folder it
+    // started in, so one file is not enough. Directory listings can report a stale size and modified time for a file
+    // Codex is still writing, so each file is opened to read its real length.
+    public IReadOnlyList<ProviderQuota> Read()
     {
-        try
+        lock (_files)
         {
-            var newest = FindNewestSession();
-            if (newest is null)
+            try
             {
-                return _latest;
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var path in RecentSessionFiles())
+                {
+                    seen.Add(path);
+                    try
+                    {
+                        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                        if (_files.TryGetValue(path, out var known) && known.Length == stream.Length)
+                        {
+                            continue;
+                        }
+
+                        _files[path] = (stream.Length, ReadLatestRateLimits(stream) ?? known.Quota);
+                    }
+                    catch (IOException)
+                    {
+                    }
+                }
+
+                foreach (var path in _files.Keys.Where(path => !seen.Contains(path)).ToList())
+                {
+                    _files.Remove(path);
+                }
+            }
+            catch
+            {
             }
 
-            if (newest.FullName == _path && newest.Length == _length && newest.LastWriteTimeUtc == _lastWrite)
-            {
-                return _latest;
-            }
-
-            _path = newest.FullName;
-            _length = newest.Length;
-            _lastWrite = newest.LastWriteTimeUtc;
-            _latest = ReadLatestRateLimits(newest) ?? _latest;
-            return _latest;
-        }
-        catch
-        {
-            return _latest;
+            return _files.Values.Select(file => file.Quota).OfType<ProviderQuota>().ToList();
         }
     }
 
-    private static FileInfo? FindNewestSession()
+    private static IEnumerable<string> RecentSessionFiles()
     {
         if (!Directory.Exists(SessionsRoot))
         {
-            return null;
+            return [];
         }
 
-        var dayDirectories = Directory.EnumerateDirectories(SessionsRoot)
+        return Directory.EnumerateDirectories(SessionsRoot)
             .OrderByDescending(path => path, StringComparer.Ordinal)
             .SelectMany(year => Directory.EnumerateDirectories(year).OrderByDescending(path => path, StringComparer.Ordinal))
             .SelectMany(month => Directory.EnumerateDirectories(month).OrderByDescending(path => path, StringComparer.Ordinal))
-            .Where(day => Directory.EnumerateFiles(day, "rollout-*.jsonl").Any())
-            .Take(2);
-
-        FileInfo? newest = null;
-        foreach (var directory in dayDirectories)
-        {
-            foreach (var file in new DirectoryInfo(directory).EnumerateFiles("rollout-*.jsonl"))
-            {
-                if (newest is null || file.LastWriteTimeUtc > newest.LastWriteTimeUtc)
-                {
-                    newest = file;
-                }
-            }
-        }
-
-        return newest;
+            .Select(day => Directory.GetFiles(day, "rollout-*.jsonl"))
+            .Where(files => files.Length > 0)
+            .Take(DayFolders)
+            .SelectMany(files => files);
     }
 
-    private static ProviderQuota? ReadLatestRateLimits(FileInfo file)
+    private static ProviderQuota? ReadLatestRateLimits(FileStream stream)
     {
-        using var stream = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         var length = stream.Length;
         for (var tail = InitialTail; ; tail *= 2)
         {

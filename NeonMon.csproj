@@ -10,6 +10,8 @@
     <ApplicationIcon>NeonMon.ico</ApplicationIcon>
     <AssemblyName>NeonMon</AssemblyName>
     <Version>0.4.2</Version>
+    <Company>AweDev</Company>
+    <Copyright>Copyright (c) 2026 AweDev</Copyright>
     <RootNamespace>NeonMon</RootNamespace>
     <DebugType>embedded</DebugType>
     <SelfContained>false</SelfContained>

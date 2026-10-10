@@ -55,6 +55,6 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:GITHUB_REF_NAME @files --clobber
           } else {
-            gh release create $env:GITHUB_REF_NAME @files --prerelease --generate-notes --title "NeonMon $env:VERSION"
+            gh release create $env:GITHUB_REF_NAME @files --prerelease --generate-notes --title "NeonMon v$env:VERSION"
           }
           if ($LASTEXITCODE -ne 0) { throw "Could not attach the downloads to the release" }

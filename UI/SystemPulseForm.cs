@@ -95,16 +95,15 @@ internal sealed class SystemPulseForm : WidgetForm
         }
 
         var scale = DeviceDpi / 96f;
-        var outer = 4.5f * scale;
+        var line = 4f * scale;
         var gap = 1.5f * scale;
-        var inner = 3.5f * scale;
-        var core = ShiftTowardEdge(DrawHiddenTab(graphics, (outer + gap + inner) / scale), 0.5f * scale);
+        var core = ShiftTowardEdge(DrawHiddenTab(graphics, (2 * line + gap) / scale), 0.5f * scale);
         var outerOnFarSide = Settings.DockEdge is DockEdge.Bottom or DockEdge.Right;
-        RectangleF Across(float offset, float thickness) => IsHorizontal
-            ? new RectangleF(core.Left, core.Top + offset, core.Width, thickness)
-            : new RectangleF(core.Left + offset, core.Top, thickness, core.Height);
-        DrawMetricBar(graphics, Across(outerOnFarSide ? 0 : outer + gap, inner), metrics[0], HiddenValue(0));
-        DrawMetricBar(graphics, Across(outerOnFarSide ? inner + gap : 0, outer), metrics[1], HiddenValue(1));
+        RectangleF Across(float offset) => IsHorizontal
+            ? new RectangleF(core.Left, core.Top + offset, core.Width, line)
+            : new RectangleF(core.Left + offset, core.Top, line, core.Height);
+        DrawMetricBar(graphics, Across(outerOnFarSide ? 0 : line + gap), metrics[0], HiddenValue(0));
+        DrawMetricBar(graphics, Across(outerOnFarSide ? line + gap : 0), metrics[1], HiddenValue(1));
     }
 
     // Until the first average arrives, the last full snapshot stands in.

@@ -9,6 +9,12 @@ internal class StripSettings
     public bool KeepOpen { get; set; }
     public string? Monitor { get; set; }
     public bool FollowMouse { get; set; }
+    public int HiddenOpacity { get; set; } = 90;
+    public int BackgroundOpacity { get; set; } = 90;
+
+    // The lowest choice is also the floor applied to hand-edited settings.
+    public static int[] HiddenOpacityChoices { get; } = [35, 50, 75, 90, 100];
+    public static int[] BackgroundOpacityChoices { get; } = [80, 90, 100];
 }
 
 internal sealed class AppSettings : StripSettings

@@ -7,8 +7,8 @@ namespace NeonMon.UI;
 
 internal abstract class WidgetForm : Form
 {
-    protected static readonly Color BackgroundTop = Color.FromArgb(246, 7, 16, 21);
-    protected static readonly Color BackgroundBottom = Color.FromArgb(250, 5, 11, 15);
+    private static readonly Color BackgroundTop = Color.FromArgb(7, 16, 21);
+    private static readonly Color BackgroundBottom = Color.FromArgb(5, 11, 15);
     protected static readonly Color Cyan = Color.FromArgb(49, 247, 210);
     protected static readonly Color Ice = Color.FromArgb(117, 241, 255);
     protected static readonly Color Foreground = Color.FromArgb(224, 246, 249);
@@ -21,6 +21,8 @@ internal abstract class WidgetForm : Form
     private static readonly Color HiddenBody = Color.FromArgb(6, 15, 20);
 
     private const int HiddenHoverInterval = 200;
+    private const int PeekRadius = 8;
+    private const int OpenRadius = 13;
     private const int RevealedHoverInterval = 80;
 
     protected Font LabelFont { get; private set; } = null!;
@@ -54,6 +56,12 @@ internal abstract class WidgetForm : Form
     private Screen _dockScreen;
     private bool _exiting;
     private nint _menuPreviousForeground;
+    private bool _renderQueued;
+    private LayeredSurface? _surface;
+    private (Size, RevealState, int)? _plainKey;
+    private int[] _pixels = [];
+    private int[] _plainPixels = [];
+    private float[] _distance = [];
 
     protected WidgetForm(StripSettings settings, Action saveSettings)
     {
@@ -68,7 +76,6 @@ internal abstract class WidgetForm : Form
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
-        Opacity = 0.94;
         DoubleBuffered = true;
         MinimumSize = new Size(6, 6);
 
@@ -126,6 +133,7 @@ internal abstract class WidgetForm : Form
         {
             Bounds = CalculateBounds(RevealState.Hidden);
             ApplyWindowRegion();
+            Invalidate();
         };
         Shown += (_, _) => _hoverTimer.Start();
     }
@@ -148,9 +156,10 @@ internal abstract class WidgetForm : Form
         get
         {
             const int toolWindow = 0x00000080;
+            const int layered = 0x00080000;
             const int noActivate = 0x08000000;
             var parameters = base.CreateParams;
-            parameters.ExStyle |= toolWindow | noActivate;
+            parameters.ExStyle |= toolWindow | layered | noActivate;
             return parameters;
         }
     }
@@ -218,22 +227,9 @@ internal abstract class WidgetForm : Form
         Size = GetTargetSize(state);
         ApplyWindowRegion();
 
-        using var bitmap = new Bitmap(ClientSize.Width, ClientSize.Height);
-        DrawToBitmap(bitmap, ClientRectangle);
-
-        // DrawToBitmap ignores the window region, so clip to it here or the rounded corners render square.
-        using var clipped = new Bitmap(bitmap.Width, bitmap.Height);
-        using (var graphics = Graphics.FromImage(clipped))
-        {
-            if (Region is not null)
-            {
-                graphics.Clip = Region;
-            }
-
-            graphics.DrawImageUnscaled(bitmap, 0, 0);
-        }
-
-        clipped.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        using var bitmap = new Bitmap(ClientSize.Width, ClientSize.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        ComposeFrame(bitmap);
+        bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
     }
 
     internal void PrepareExit() => _exiting = true;
@@ -725,25 +721,280 @@ internal abstract class WidgetForm : Form
         _hoveredTooltip = null;
     }
 
-    protected override void OnPaint(PaintEventArgs args)
+    // The strip is a per-pixel layered window, so it never paints through WM_PAINT: every invalidation renders a
+    // frame for UpdateLayeredWindow. Pixels outside the window region stay fully transparent.
+    private void DrawFrame(Graphics graphics, bool backgroundOnly = false)
     {
-        base.OnPaint(args);
-        args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        args.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        if (Region is not null)
+        {
+            graphics.Clip = Region;
+        }
 
         if (_state == RevealState.Hidden)
         {
-            DrawHidden(args.Graphics);
+            DrawHidden(graphics);
+        }
+        else if (backgroundOnly)
+        {
+            DrawBackground(graphics, _state == RevealState.Peek ? PeekRadius : OpenRadius);
         }
         else if (_state == RevealState.Peek)
         {
-            DrawPeek(args.Graphics);
+            DrawPeek(graphics);
         }
         else
         {
-            DrawBackground(args.Graphics, 13);
-            DrawHeader(args.Graphics);
-            DrawBody(args.Graphics);
+            DrawBackground(graphics, OpenRadius);
+            DrawHeader(graphics);
+            DrawBody(graphics);
+        }
+    }
+
+    // Hidden fades the whole tab; Peek and Open fade only the background, so text and bars stay solid.
+    private byte WindowAlpha => _state == RevealState.Hidden
+        ? ToAlpha(Settings.HiddenOpacity, StripSettings.HiddenOpacityChoices.Min())
+        : (byte)255;
+
+    private byte BackgroundAlpha => _state == RevealState.Hidden
+        ? (byte)255
+        : ToAlpha(Settings.BackgroundOpacity, StripSettings.BackgroundOpacityChoices.Min());
+
+    private static byte ToAlpha(int percent, int minimum) => (byte)Math.Round(Math.Clamp(percent, minimum, 100) * 255 / 100d);
+
+    // The frame is drawn on an opaque background, so text keeps ClearType. A layered window has one alpha per pixel
+    // and cannot keep ClearType's per-channel edges over see-through pixels, so content and a ring around it stay
+    // opaque and only the empty background fades.
+    private void ComposeFrame(Bitmap target)
+    {
+        using (var graphics = Graphics.FromImage(target))
+        {
+            graphics.Clear(Color.Transparent);
+            DrawFrame(graphics);
+        }
+
+        var alpha = BackgroundAlpha;
+        if (alpha == 255)
+        {
+            return;
+        }
+
+        var plainKey = (target.Size, _state, DeviceDpi);
+        if (_plainKey != plainKey)
+        {
+            using var plain = new Bitmap(target.Width, target.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+            using (var graphics = Graphics.FromImage(plain))
+            {
+                DrawFrame(graphics, backgroundOnly: true);
+            }
+
+            _plainPixels = new int[target.Width * target.Height];
+            CopyPixels(plain, _plainPixels, toBitmap: false);
+            _plainKey = plainKey;
+        }
+
+        FadeBackground(target, alpha);
+    }
+
+    private void FadeBackground(Bitmap target, byte alpha)
+    {
+        const float ring = 1;
+        const float fade = 2;
+        const float far = ring + fade;
+        const float diagonal = 1.4142f;
+        const int contentThreshold = 10;
+        var width = target.Width;
+        var height = target.Height;
+        var stride = width + 2;
+        if (_pixels.Length != width * height)
+        {
+            _pixels = new int[width * height];
+            // A one-pixel border that stays at the cap lets the distance passes skip edge checks.
+            _distance = new float[stride * (height + 2)];
+            Array.Fill(_distance, far);
+        }
+
+        CopyPixels(target, _pixels, toBitmap: false);
+        var pixels = _pixels.AsSpan();
+        var plain = _plainPixels.AsSpan();
+        var distance = _distance.AsSpan();
+
+        for (int y = 0, i = 0; y < height; y++)
+        {
+            var j = (y + 1) * stride + 1;
+            for (var x = 0; x < width; x++, i++, j++)
+            {
+                int a = pixels[i], b = plain[i];
+                var content = Math.Abs(((a >> 16) & 255) - ((b >> 16) & 255)) > contentThreshold
+                    || Math.Abs(((a >> 8) & 255) - ((b >> 8) & 255)) > contentThreshold
+                    || Math.Abs((a & 255) - (b & 255)) > contentThreshold;
+                distance[j] = content ? 0 : far;
+            }
+        }
+
+        // Two-pass chamfer distance to the nearest content pixel, capped at the end of the fade.
+        for (var y = 1; y <= height; y++)
+        {
+            var j = y * stride + 1;
+            for (var x = 0; x < width; x++, j++)
+            {
+                var d = distance[j];
+                if (d == 0)
+                {
+                    continue;
+                }
+
+                d = Math.Min(d, distance[j - 1] + 1);
+                d = Math.Min(d, distance[j - stride] + 1);
+                d = Math.Min(d, distance[j - stride - 1] + diagonal);
+                distance[j] = Math.Min(d, distance[j - stride + 1] + diagonal);
+            }
+        }
+
+        for (var y = height; y >= 1; y--)
+        {
+            var j = y * stride + width;
+            for (var x = 0; x < width; x++, j--)
+            {
+                var d = distance[j];
+                if (d == 0)
+                {
+                    continue;
+                }
+
+                d = Math.Min(d, distance[j + 1] + 1);
+                d = Math.Min(d, distance[j + stride] + 1);
+                d = Math.Min(d, distance[j + stride + 1] + diagonal);
+                distance[j] = Math.Min(d, distance[j + stride - 1] + diagonal);
+            }
+        }
+
+        Span<byte> faded = stackalloc byte[256];
+        for (var v = 0; v < 256; v++)
+        {
+            faded[v] = (byte)((v * alpha + 127) / 255);
+        }
+
+        for (int y = 0, i = 0; y < height; y++)
+        {
+            var j = (y + 1) * stride + 1;
+            for (var x = 0; x < width; x++, i++, j++)
+            {
+                var d = distance[j];
+                var pixel = pixels[i];
+                if (d <= ring || pixel == 0)
+                {
+                    continue;
+                }
+
+                if (d >= far)
+                {
+                    pixels[i] = (faded[(pixel >> 24) & 255] << 24) | (faded[(pixel >> 16) & 255] << 16)
+                        | (faded[(pixel >> 8) & 255] << 8) | faded[pixel & 255];
+                    continue;
+                }
+
+                var source = (pixel >> 24) & 255;
+                var keep = 1 - (d - ring) / fade;
+                var low = source * alpha / 255f;
+                var final = low + (source - low) * keep;
+                var factor = final / source;
+                pixels[i] = ((int)(final + 0.5f) << 24)
+                    | ((int)(((pixel >> 16) & 255) * factor + 0.5f) << 16)
+                    | ((int)(((pixel >> 8) & 255) * factor + 0.5f) << 8)
+                    | (int)((pixel & 255) * factor + 0.5f);
+            }
+        }
+
+        CopyPixels(target, _pixels, toBitmap: true);
+    }
+
+    private static void CopyPixels(Bitmap bitmap, int[] pixels, bool toBitmap)
+    {
+        var data = bitmap.LockBits(new Rectangle(Point.Empty, bitmap.Size),
+            toBitmap ? System.Drawing.Imaging.ImageLockMode.WriteOnly : System.Drawing.Imaging.ImageLockMode.ReadOnly,
+            System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        try
+        {
+            if (toBitmap)
+            {
+                Marshal.Copy(pixels, 0, data.Scan0, pixels.Length);
+            }
+            else
+            {
+                Marshal.Copy(data.Scan0, pixels, 0, pixels.Length);
+            }
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
+    }
+
+    protected override void OnInvalidated(InvalidateEventArgs args)
+    {
+        base.OnInvalidated(args);
+        if (!_renderQueued && IsHandleCreated)
+        {
+            _renderQueued = true;
+            BeginInvoke(RenderLayered);
+        }
+    }
+
+    private void RenderLayered()
+    {
+        _renderQueued = false;
+        if (IsDisposed || !IsHandleCreated || Width <= 0 || Height <= 0)
+        {
+            return;
+        }
+
+        if (_surface is null || _surface.Image.Size != Size)
+        {
+            _surface?.Dispose();
+            _surface = new LayeredSurface(Width, Height);
+        }
+
+        ComposeFrame(_surface.Image);
+        var size = _surface.Image.Size;
+        var source = Point.Empty;
+        var blend = new BlendFunction { SourceConstantAlpha = WindowAlpha, AlphaFormat = AcSrcAlpha };
+        UpdateLayeredWindow(Handle, nint.Zero, nint.Zero, ref size, _surface.Dc, ref source, 0, ref blend, UlwAlpha);
+    }
+
+    // A premultiplied DIB that GDI+ draws into directly and UpdateLayeredWindow reads, kept between frames.
+    private sealed class LayeredSurface : IDisposable
+    {
+        private readonly nint _bitmap;
+        private readonly nint _previous;
+
+        public LayeredSurface(int width, int height)
+        {
+            var header = new BitmapInfoHeader
+            {
+                Size = Marshal.SizeOf<BitmapInfoHeader>(),
+                Width = width,
+                Height = -height,
+                Planes = 1,
+                BitCount = 32
+            };
+            Dc = CreateCompatibleDC(nint.Zero);
+            _bitmap = CreateDIBSection(Dc, ref header, 0, out var bits, nint.Zero, 0);
+            _previous = SelectObject(Dc, _bitmap);
+            Image = new Bitmap(width, height, width * 4, System.Drawing.Imaging.PixelFormat.Format32bppPArgb, bits);
+        }
+
+        public nint Dc { get; }
+
+        public Bitmap Image { get; }
+
+        public void Dispose()
+        {
+            Image.Dispose();
+            SelectObject(Dc, _previous);
+            DeleteObject(_bitmap);
+            DeleteDC(Dc);
         }
     }
 
@@ -751,6 +1002,7 @@ internal abstract class WidgetForm : Form
     {
         base.OnHandleCreated(args);
         CreateFonts();
+        Invalidate();
     }
 
     protected override void OnPaintBackground(PaintEventArgs args)
@@ -863,7 +1115,7 @@ internal abstract class WidgetForm : Form
 
     protected void DrawPeekOutline(Graphics graphics)
     {
-        DrawBackground(graphics, 8);
+        DrawBackground(graphics, PeekRadius);
         var scale = DeviceDpi / 96f;
         var inset = 2.5f * scale;
         var outlineBounds = new RectangleF(
@@ -1009,6 +1261,56 @@ internal abstract class WidgetForm : Form
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();
 
+    private const byte AcSrcAlpha = 0x01;
+    private const int UlwAlpha = 0x00000002;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BlendFunction
+    {
+        public byte BlendOp;
+        public byte BlendFlags;
+        public byte SourceConstantAlpha;
+        public byte AlphaFormat;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UpdateLayeredWindow(nint window, nint destinationDc, nint destination, ref Size size, nint sourceDc,
+        ref Point source, int colorKey, ref BlendFunction blend, int flags);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BitmapInfoHeader
+    {
+        public int Size;
+        public int Width;
+        public int Height;
+        public short Planes;
+        public short BitCount;
+        public int Compression;
+        public int SizeImage;
+        public int XPelsPerMeter;
+        public int YPelsPerMeter;
+        public int ClrUsed;
+        public int ClrImportant;
+    }
+
+    [DllImport("gdi32.dll")]
+    private static extern nint CreateDIBSection(nint dc, ref BitmapInfoHeader header, uint usage, out nint bits, nint section, uint offset);
+
+    [DllImport("gdi32.dll")]
+    private static extern nint CreateCompatibleDC(nint dc);
+
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeleteDC(nint dc);
+
+    [DllImport("gdi32.dll")]
+    private static extern nint SelectObject(nint dc, nint value);
+
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeleteObject(nint value);
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetForegroundWindow(nint window);
@@ -1033,6 +1335,7 @@ internal abstract class WidgetForm : Form
             _collapseTimer.Dispose();
             _hoverTimer.Dispose();
             _toolTip.Dispose();
+            _surface?.Dispose();
             DisposeFonts();
         }
 

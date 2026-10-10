@@ -586,10 +586,27 @@ internal sealed class NeonMonContext : ApplicationContext
                         form.SetMonitor(screens[index - 1]);
                     }
                 }),
-            new ToggleRow("Keep open", () => form.Settings.KeepOpen, form.SetKeepOpen)
+            new ToggleRow("Keep open", () => form.Settings.KeepOpen, form.SetKeepOpen),
+            new SectionRow("Opacity"),
+            OpacityRow(form, "Hidden tab", StripSettings.HiddenOpacityChoices, settings => settings.HiddenOpacity,
+                (settings, value) => settings.HiddenOpacity = value, "The whole tab."),
+            OpacityRow(form, "Background", StripSettings.BackgroundOpacityChoices, settings => settings.BackgroundOpacity,
+                (settings, value) => settings.BackgroundOpacity = value, "Peek and open. Text and bars stay solid.")
         ]);
         return rows;
     }
+
+    private ChoiceRow OpacityRow(WidgetForm form, string label, int[] choices, Func<StripSettings, int> get,
+        Action<StripSettings, int> set, string hint) =>
+        new(label, [.. choices.Select(percent => $"{percent}%")],
+            () => Array.IndexOf(choices, choices.MinBy(choice => Math.Abs(choice - get(form.Settings)))),
+            index =>
+            {
+                set(form.Settings, choices[index]);
+                SaveSettings();
+                form.Invalidate();
+            },
+            hint);
 
     private List<SettingsRow> PeekRows()
     {

@@ -77,7 +77,7 @@ Values show remaining quota by default; switch to used quota with **Show quota a
 
 ## Download
 
-Each [release](https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget/releases) from v0.4.3 on has two downloads for 64-bit Windows 10/11:
+Each [release](https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget/releases) from v0.8.0 on has two downloads for 64-bit Windows 10/11:
 
 - `NeonMon-<version>.zip`: under 1 MB. Needs the [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0); Windows offers to install it if it is missing.
 - `NeonMon-<version>-standalone.zip`: about 45 MB, with .NET included. Nothing else to install, but it starts a little slower.

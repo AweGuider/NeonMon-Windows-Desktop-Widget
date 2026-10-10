@@ -9,7 +9,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>NeonMon.ico</ApplicationIcon>
     <AssemblyName>NeonMon</AssemblyName>
-    <Version>0.4.2</Version>
+    <Version>0.8.0</Version>
     <Company>AweDev</Company>
     <Copyright>Copyright (c) 2026 AweDev</Copyright>
     <RootNamespace>NeonMon</RootNamespace>

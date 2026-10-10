@@ -26,7 +26,7 @@ Options: `--strip system|quota`, `--state Hidden|Peek|Open`, `--dock Top|Bottom|
 
 ## Releasing
 
-Set `<Version>` in `NeonMon.csproj`, commit, then push a matching tag such as `v0.4.3`. The Release workflow builds both downloads, runs the self-test on each, and attaches them to a pre-release for that tag. A tag that does not match the project version fails the workflow.
+Set `<Version>` in `NeonMon.csproj`, commit, then push a matching tag such as `v0.8.0`. The Release workflow builds both downloads, runs the self-test on each, and attaches them to a pre-release for that tag. A tag that does not match the project version fails the workflow.
 
 ## Ground rules
 

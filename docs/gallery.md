@@ -53,3 +53,7 @@ The hidden state is a small tab hanging off the screen edge: a dark body with br
 **Settings…** in any menu opens a window with a page for each pulse, general options, and support links. The right-click menus can also switch to a dark style there.
 
 ![Settings window, Quota pulse page](images/settings.png)
+
+The General page holds the options that apply to both pulses, including the hold-to-peek hotkey and the daily update check.
+
+![Settings window, General page](images/settings-general.png)

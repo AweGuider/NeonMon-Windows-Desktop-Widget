@@ -4,6 +4,52 @@ How NeonMon grew from a single system-monitor strip into a two-strip desktop wid
 
 [Back to the README](../README.md)
 
+## October 10, 2026: update notice and downloads (v0.8.0)
+
+Until now the only way to learn about a new version was to look at GitHub, and the only way to get one was to build it. Once a day NeonMon now reads the public release list and tells you once when a newer version exists; the tray menu and **Settings → Support** keep showing it until you update. It sends no account or usage data, downloads nothing, and **Settings → General → Check for updates** turns it off.
+
+Releases also carry something to download. Pushing a version tag builds two zips, runs the self-test on each, and attaches them: a small one that needs the .NET 9 Desktop Runtime, and a standalone one with .NET included. An installer is still on the list.
+
+## October 10, 2026: new defaults and thinner tabs (v0.7.1)
+
+A first start now looks the way the app is actually used: dark menus, medium pulses that follow the mouse, solid backgrounds, CPU and GPU bars on the System hidden tab, uptime in its peek, and slower in-use refresh (Claude 5 minutes, Codex 10). Existing settings are untouched.
+
+The two-line hidden tabs lost one more pixel and are now 15 px, a suggestion from a user. The System lines are 3.5 px each. The Quota weekly line is 4 px and snaps to whole screen pixels, because at 125% scaling its amber outline otherwise smeared across two rows.
+
+![System and Quota hidden tabs at 15 px, with CPU and GPU bars on the System tab](images/history-tabs-15px.png)
+
+## October 10, 2026: hold to peek (v0.7.0)
+
+**Settings → General → Hold to peek** adds an optional global hotkey: hold it and every pulse shows its peek at once, let go and they hide again. Pulses that were open or pinned stay as they were, nothing takes focus, and the keys are watched only while they are held. The recorder refuses a bare key, and Settings warns when another app already owns the combination. It is off by default.
+
+![General settings with the Hold to peek section](images/history-hold-to-peek.png)
+
+## October 10, 2026: live tabs and see-through panels (v0.6.0)
+
+The System hidden tab was a plain bar. Following a feature request, it can now show up to two live lines, picked from CPU, GPU, memory, and system drive, averaged over 1 to 30 seconds. While hidden it samples only the chosen values; with a GPU line that costs about 0.25% of one core more than the plain tab.
+
+The Quota peek shows when a limit resets once it is at 10% or less, and always when it is used up. A used-up limit is a dim red line on the hidden tab, because an empty line looked the same as missing data.
+
+**Opacity** settings arrived for each pulse: the hidden tab fades as a whole, and the peek and open background can be see-through. The strips became per-pixel layered windows for this. Windows cannot draw ClearType text on see-through pixels, so text, bars, and a thin fading ring around them stay solid and only the empty background fades.
+
+The two-line Quota tab went from 17 to 16 px, and the Settings window got a fixed height and a scroll bar.
+
+![System pulse settings with the Opacity and Hidden tab sections](images/history-opacity-settings.png)
+
+## October 9, 2026: system extras and quota control (v0.5.0)
+
+Clicking the CPU, GPU, or memory card opens Task Manager, another user request. USB sticks and other removable drives appear after the fixed drives. **Show Claude** and **Show Codex** hide either provider; the tab, peek, and open layouts adapt to one provider, and a hidden provider is no longer read.
+
+Provider limits used to be read on a fixed schedule. They are now read every 2, 5, or 10 minutes while that provider is in use, and every 45 minutes otherwise. In use means quota or session activity changed, not that an app is open.
+
+![Quota pulse settings with Show Claude, Show Codex, and Refresh while in use](images/history-provider-settings.png)
+
+Peek also stopped flickering near the ends of a hidden tab. Hidden and peek have different sizes, and the pointer could be inside one and outside the other; hover zones now come from fixed geometry instead of the animated window.
+
+## October 9, 2026: fixes (v0.4.3)
+
+Three fixes from daily use. Codex quota could sit near 5% while Codex itself reported 0 to 1%: several sessions wrote logs in parallel and an older log could win; the highest use within a window now wins. A click outside a strip menu closes it, and the menu no longer opens under the pulse. And **Open Claude CLI** inherited markers from a parent Claude session, which a user reported; they are now removed so the terminal starts a normal session.
+
 ## October 7, 2026: start with Windows (v0.4.2)
 
 **Settings → General → Start with Windows** puts a shortcut to NeonMon in your Startup folder, the same place `shell:startup` opens, so it starts hidden at sign-in. There is no extra setting: the shortcut is the setting, and Task Manager's Startup apps can switch it off as usual. If the shortcut points to a copy in another folder, for example after moving NeonMon, Settings says so.

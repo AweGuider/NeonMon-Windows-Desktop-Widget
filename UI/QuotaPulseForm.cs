@@ -291,7 +291,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         }
 
         var scale = DeviceDpi / 96f;
-        var weeklyThickness = 4.5f * scale;
+        var weeklyThickness = 4f * scale;
         var lineGap = 1.5f * scale;
         var fiveHourThickness = 3.5f * scale;
         var core = ShiftTowardEdge(DrawHiddenTab(graphics, (weeklyThickness + lineGap + fiveHourThickness) / scale), 0.5f * scale);
@@ -306,6 +306,17 @@ internal sealed class QuotaPulseForm : WidgetForm
         var weeklyOnFarSide = Settings.DockEdge is DockEdge.Bottom or DockEdge.Right;
         var weekly = Across(core, weeklyOnFarSide ? weeklyThickness + lineGap : 0, weeklyThickness);
         var fiveHour = Across(core, weeklyOnFarSide ? 0 : weeklyThickness + lineGap, fiveHourThickness);
+
+        // The amber outline is one pixel wide and centred on the weekly line's edge, so that edge sits on a half
+        // pixel; anywhere else the outline smears across two rows.
+        if (IsHorizontal)
+        {
+            weekly.Y = MathF.Round(weekly.Y - 0.5f) + 0.5f;
+        }
+        else
+        {
+            weekly.X = MathF.Round(weekly.X - 0.5f) + 0.5f;
+        }
 
         FillCircleAlong(graphics, core, Tint(visible[0].Provider), 0, circle);
         var segments = new List<(ProviderQuota, float)> { (visible[0], circle + circleGap) };

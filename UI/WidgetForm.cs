@@ -174,7 +174,7 @@ internal abstract class WidgetForm : Form
 
     protected abstract string Title { get; }
 
-    protected const int TwoLineTabThickness = 16;
+    protected const int TwoLineTabThickness = 15;
 
     protected virtual Size GetLogicalHiddenSize(bool horizontal) => horizontal ? new Size(132, 9) : new Size(9, 132);
 

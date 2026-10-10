@@ -66,9 +66,6 @@ internal sealed class SystemPulseForm : WidgetForm
         }));
     }
 
-    // Two equal 3.5 px lines need one pixel less than the Quota pulse's two-line tab.
-    private const int TwoMetricTabThickness = 15;
-
     protected override Size GetLogicalHiddenSize(bool horizontal)
     {
         var count = _settings.HiddenMetrics.Count;
@@ -77,7 +74,7 @@ internal sealed class SystemPulseForm : WidgetForm
             return base.GetLogicalHiddenSize(horizontal);
         }
 
-        var thickness = count == 1 ? 9 : TwoMetricTabThickness;
+        var thickness = count == 1 ? 9 : TwoLineTabThickness;
         return horizontal ? new Size(132, thickness) : new Size(thickness, 132);
     }
 

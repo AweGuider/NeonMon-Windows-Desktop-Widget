@@ -63,7 +63,8 @@ internal static class Program
             provider => settings.Quota?.ActiveRefresh(provider) ?? TimeSpan.FromMinutes(QuotaSettings.ActiveRefreshChoices[0]),
             provider => settings.Quota?.Shows(provider) ?? true);
         using var bridge = new MetricsBridge(() => telemetry.Latest, () => quota.Latest, () => settings.HtmlBridgeAllowedOrigins);
-        using var context = new NeonMonContext(settings, settingsStore, telemetry, quota, bridge);
+        using var updates = new UpdateChecker(() => settings.CheckForUpdates, Application.ProductVersion);
+        using var context = new NeonMonContext(settings, settingsStore, telemetry, quota, bridge, updates);
 
         if (settingsPreviewIndex >= 0 && settingsPreviewIndex + 1 < args.Length)
         {
@@ -144,6 +145,11 @@ internal static class Program
                 if (!SelfTestRefreshPolicy())
                 {
                     return 7;
+                }
+
+                if (!SelfTestUpdateParsing())
+                {
+                    return 8;
                 }
 
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
@@ -303,6 +309,28 @@ internal static class Program
             && QuotaService.Consumed(Used(40, reset), Used(41, reset.AddSeconds(30)))
             && !QuotaService.Consumed(Used(41, reset), Used(41, reset))
             && !QuotaService.Consumed(Used(90, reset), Used(5, reset.AddHours(5)));
+    }
+
+    private static bool SelfTestUpdateParsing()
+    {
+        const string releases = """
+            [
+              { "tag_name": "v9.0.0", "draft": true, "html_url": "https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget/releases/tag/v9.0.0" },
+              { "tag_name": "v0.4.9", "prerelease": true, "html_url": "https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget/releases/tag/v0.4.9" },
+              { "tag_name": "v0.4.10-beta", "prerelease": true, "html_url": "https://example.com/elsewhere" },
+              { "tag_name": "nightly" },
+              { "tag_name": "v0.4.2", "html_url": "https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget/releases/tag/v0.4.2" }
+            ]
+            """;
+        var latest = UpdateChecker.FindLatest(releases);
+        return latest is not null
+            && latest.Version == new Version(0, 4, 10)
+            && latest.PageUrl == UpdateChecker.ReleasesPage
+            && UpdateChecker.ParseVersion("0.5") == new Version(0, 5, 0)
+            && UpdateChecker.ParseVersion("0.4.2+abc123") == new Version(0, 4, 2)
+            && UpdateChecker.ParseVersion("latest") is null
+            && UpdateChecker.FindLatest("[]") is null
+            && UpdateChecker.FindLatest("{\"message\":\"rate limited\"}") is null;
     }
 
     private static string? ArgumentValue(string[] args, string name)

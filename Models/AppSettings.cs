@@ -19,6 +19,7 @@ internal class StripSettings
 
 internal sealed class AppSettings : StripSettings
 {
+    public bool CheckForUpdates { get; set; } = true;
     public bool HtmlBridgeEnabled { get; set; }
     public int HtmlBridgePort { get; set; } = 27171;
     public List<string> HtmlBridgeAllowedOrigins { get; set; } = [];

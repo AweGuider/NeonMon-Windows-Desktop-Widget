@@ -12,6 +12,8 @@ internal sealed class NeonMonContext : ApplicationContext
     private readonly TelemetryService _telemetry;
     private readonly QuotaService _quota;
     private readonly MetricsBridge _bridge;
+    private readonly UpdateChecker _updates;
+    private string? _noticeUrl;
     private readonly Icon _trayIcon;
     private readonly NotifyIcon _tray;
     private readonly ContextMenuStrip _systemMenu;
@@ -35,8 +37,10 @@ internal sealed class NeonMonContext : ApplicationContext
     private bool _started;
     private bool _exiting;
 
-    public NeonMonContext(AppSettings settings, SettingsStore settingsStore, TelemetryService telemetry, QuotaService quota, MetricsBridge bridge)
+    public NeonMonContext(AppSettings settings, SettingsStore settingsStore, TelemetryService telemetry, QuotaService quota, MetricsBridge bridge,
+        UpdateChecker updates)
     {
+        _updates = updates;
         _settings = settings;
         _settingsStore = settingsStore;
         _telemetry = telemetry;
@@ -75,6 +79,15 @@ internal sealed class NeonMonContext : ApplicationContext
             Visible = false,
             ContextMenuStrip = _trayMenu
         };
+        _tray.BalloonTipClicked += (_, _) =>
+        {
+            if (_noticeUrl is { } url)
+            {
+                _noticeUrl = null;
+                OpenUrl(url);
+            }
+        };
+        _tray.BalloonTipClosed += (_, _) => _noticeUrl = null;
         _tray.MouseClick += (_, args) =>
         {
             if (args.Button == MouseButtons.Left)
@@ -128,6 +141,9 @@ internal sealed class NeonMonContext : ApplicationContext
         _hotkeyWindow = new HotkeyWindow();
         _hotkeyWindow.Pressed += OnPeekHotkey;
         ApplyPeekHotkey();
+        _updates.Checked += OnUpdateChecked;
+        _updates.Start();
+        ShowUpdateMarker();
         _started = true;
     }
 
@@ -401,6 +417,12 @@ internal sealed class NeonMonContext : ApplicationContext
     {
         ClearMenu(menu);
         ApplyMenuStyle(menu);
+        if (_updates.Available is { } update)
+        {
+            menu.Items.Add(new ToolStripMenuItem($"Update available: {update.Version}", null, (_, _) => OpenUrl(update.PageUrl)));
+            menu.Items.Add(new ToolStripSeparator());
+        }
+
         foreach (var (form, name) in Pulses)
         {
             menu.Items.Add(new ToolStripMenuItem($"Open {name}", null, (_, _) => form.SetRevealState(RevealState.Open))
@@ -494,6 +516,8 @@ internal sealed class NeonMonContext : ApplicationContext
                 : [new ActionRow("Default", () => HotkeyWindow.Describe(AppSettings.DefaultPeekHotkeyModifiers, AppSettings.DefaultPeekHotkeyKey),
                     "Reset", ResetPeekHotkey)],
             new SectionRow("Advanced"),
+            new ToggleRow("Check for updates", () => _settings.CheckForUpdates, SetCheckForUpdates,
+                "Asks GitHub once a day. Nothing is downloaded."),
             new ToggleRow($"HTML bridge · 127.0.0.1:{_settings.HtmlBridgePort}", () => _settings.HtmlBridgeEnabled, _ => ToggleBridge(),
                 "Local JSON for your own dashboards.")
         ]);
@@ -545,11 +569,43 @@ internal sealed class NeonMonContext : ApplicationContext
         return buffer.ToArray();
     }
 
-    private const string RepositoryUrl = "https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget";
+    private const string RepositoryUrl = UpdateChecker.RepositoryUrl;
+
+    // Runs on the checker's thread. The tray notice shows once per version; the menu entry, tooltip and Version
+    // row stay until the user updates.
+    private void OnUpdateChecked(AvailableUpdate? update, bool announce)
+    {
+        if (!SystemForm.IsHandleCreated || SystemForm.IsDisposed)
+        {
+            return;
+        }
+
+        SystemForm.BeginInvoke(() =>
+        {
+            ShowUpdateMarker();
+            _settingsForm?.Invalidate();
+            if (update is not null && announce && _settings.CheckForUpdates)
+            {
+                _noticeUrl = update.PageUrl;
+                _tray.ShowBalloonTip(8000, "NeonMon", $"Version {update.Version} is available. Click to open the release page.", ToolTipIcon.Info);
+            }
+        });
+    }
+
+    private void ShowUpdateMarker() => _tray.Text = _updates.Available is null ? "NeonMon" : "NeonMon · update available";
+
+    private void SetCheckForUpdates(bool on)
+    {
+        _settings.CheckForUpdates = on;
+        SaveSettings();
+        _updates.Wake();
+        ShowUpdateMarker();
+    }
 
     private List<SettingsRow> SupportRows()
     {
         var version = Application.ProductVersion.Split('+')[0];
+        var update = _updates.Available;
         return
         [
             new SectionRow("Support NeonMon"),
@@ -558,7 +614,8 @@ internal sealed class NeonMonContext : ApplicationContext
             new SectionRow("Project"),
             new ActionRow("Source code", () => "GitHub", "Open", () => OpenUrl(RepositoryUrl)),
             new ActionRow("Report an issue", () => "GitHub issues", "Open", () => OpenUrl($"{RepositoryUrl}/issues/new/choose")),
-            new ActionRow("Version", () => version, "Release notes", () => OpenUrl($"{RepositoryUrl}/releases"))
+            new ActionRow("Version", () => update is null ? version : $"{version} · {update.Version} available",
+                update is null ? "Release notes" : "Get update", () => OpenUrl(update?.PageUrl ?? UpdateChecker.ReleasesPage))
         ];
     }
 
@@ -1196,10 +1253,15 @@ internal sealed class NeonMonContext : ApplicationContext
 
         var command = $"node \\\"{script.Replace('\\', '/')}\\\"";
         Clipboard.SetText($"\"statusLine\": {{ \"type\": \"command\", \"command\": \"{command}\" }}");
+        _noticeUrl = null;
         _tray.ShowBalloonTip(4000, "NeonMon", "Copied. Paste it into ~/.claude/settings.json. Needs Node.js.", ToolTipIcon.Info);
     }
 
-    private void ShowNotice(string text) => _tray.ShowBalloonTip(2500, "NeonMon", text, ToolTipIcon.Warning);
+    private void ShowNotice(string text)
+    {
+        _noticeUrl = null;
+        _tray.ShowBalloonTip(2500, "NeonMon", text, ToolTipIcon.Warning);
+    }
 
     private void SaveSettings()
     {
@@ -1247,6 +1309,7 @@ internal sealed class NeonMonContext : ApplicationContext
             _foregroundWatcher?.Dispose();
             _hotkeyWindow?.Dispose();
             _groupReveal.Dispose();
+            _updates.Checked -= OnUpdateChecked;
             _quota.SnapshotUpdated -= QuotaForm.PostSnapshot;
             _tray.Visible = false;
             _tray.Dispose();

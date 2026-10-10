@@ -56,6 +56,7 @@ More screenshots are in the [gallery](docs/gallery.md), and the [devlog](docs/de
 - **Settings window:** every option grouped by pulse, and either pulse can be turned off if you only want one.
 - **No paid API usage:** Quota pulse never calls a model and never uses API keys (see below).
 - **Optional local JSON bridge** for your own dashboards.
+- **Update notice:** once a day NeonMon asks GitHub whether a newer release exists and tells you once per version. It reads the public release list only, sends no account or usage data, and never downloads or installs anything. Turn it off with **Settings → General → Check for updates**.
 
 ## Quota pulse data sources
 

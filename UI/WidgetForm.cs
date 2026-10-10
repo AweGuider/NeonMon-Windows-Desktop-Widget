@@ -950,6 +950,15 @@ internal abstract class WidgetForm : Form
             return;
         }
 
+        // The fade buffers are sized for Peek or Open and the hidden tab never fades, so they are released here.
+        if (_state == RevealState.Hidden && _pixels.Length > 0)
+        {
+            _pixels = [];
+            _plainPixels = [];
+            _distance = [];
+            _plainKey = null;
+        }
+
         if (_surface is null || _surface.Image.Size != Size)
         {
             _surface?.Dispose();

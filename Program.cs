@@ -194,9 +194,11 @@ internal static class Program
     private static AppSettings SampleSettings() => new()
     {
         FollowMouse = true,
+        BackgroundOpacity = 100,
         Quota = new QuotaSettings
         {
             FollowMouse = true,
+            BackgroundOpacity = 100,
             ClaudeCliDirectory = @"C:\Users\you\Projects",
             CodexCliDirectory = @"C:\Users\you"
         }

@@ -15,7 +15,8 @@
   <a href="#what-it-is">What it is</a> ·
   <a href="#highlights">Highlights</a> ·
   <a href="#quota-pulse-data-sources">Data sources</a> ·
-  <a href="#build-and-run">Build and run</a> ·
+  <a href="#download">Download</a> ·
+  <a href="#build-from-source">Build from source</a> ·
   <a href="docs/gallery.md">Gallery</a> ·
   <a href="docs/devlog.md">Devlog</a> ·
   <a href="SECURITY.md">Security</a>
@@ -74,7 +75,16 @@ Quota pulse never calls a model and never uses API keys. Its sources are local:
 
 Values show remaining quota by default; switch to used quota with **Show quota as** in the Quota pulse menu or Settings. Run `NeonMon.exe --dump-quota quota.json` to write the current quota data to a file.
 
-## Build and run
+## Download
+
+Each [release](https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget/releases) from v0.4.3 on has two downloads for 64-bit Windows 10/11:
+
+- `NeonMon-<version>.zip`: under 1 MB. Needs the [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0); Windows offers to install it if it is missing.
+- `NeonMon-<version>-standalone.zip`: about 45 MB, with .NET included. Nothing else to install, but it starts a little slower.
+
+Unzip either one anywhere and run `NeonMon.exe`. The builds are not code-signed, so Windows SmartScreen may ask for confirmation the first time. To update, close NeonMon and unzip the new version over the old one; your settings are kept.
+
+## Build from source
 
 Requirements: Windows 10/11 and the .NET 9 SDK.
 

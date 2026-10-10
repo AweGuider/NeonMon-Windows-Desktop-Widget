@@ -24,6 +24,10 @@ NeonMon can render any strip to a PNG with fixed sample data, which makes UI cha
 
 Options: `--strip system|quota`, `--state Hidden|Peek|Open`, `--dock Top|Bottom|Left|Right`, and a size of `Small`, `Medium`, or `Large`. If a change is not meant to affect a view, its render should stay pixel-identical. Include before and after renders in pull requests that change the UI.
 
+## Releasing
+
+Set `<Version>` in `NeonMon.csproj`, commit, then push a matching tag such as `v0.4.3`. The Release workflow builds both downloads, runs the self-test on each, and attaches them to a pre-release for that tag. A tag that does not match the project version fails the workflow.
+
 ## Ground rules
 
 - **No paid API usage.** NeonMon must never call a model, require an API key, or consume quota. Read-only sources only.

@@ -1,0 +1,60 @@
+name: Release
+
+# Pushing a tag such as v0.4.3 builds both downloads and attaches them to a pre-release for that tag.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Check the tag matches the project version
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content NeonMon.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if ("v$version" -ne $env:GITHUB_REF_NAME) { throw "Tag $env:GITHUB_REF_NAME does not match version $version in NeonMon.csproj" }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Publish the small build (needs the .NET 9 Desktop Runtime)
+        run: dotnet publish -c Release -r win-x64 --self-contained false -o publish/small
+
+      - name: Publish the standalone build
+        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o publish/standalone
+
+      - name: Self-test both builds
+        shell: pwsh
+        run: |
+          foreach ($build in 'small', 'standalone') {
+            $process = Start-Process -FilePath "publish\$build\NeonMon.exe" -ArgumentList '--self-test' -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "Self-test of the $build build failed with exit code $($process.ExitCode)" }
+          }
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path publish\small\* -DestinationPath "NeonMon-$env:VERSION.zip"
+          Compress-Archive -Path publish\standalone\* -DestinationPath "NeonMon-$env:VERSION-standalone.zip"
+
+      - name: Attach to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = "NeonMon-$env:VERSION.zip", "NeonMon-$env:VERSION-standalone.zip"
+          gh release view $env:GITHUB_REF_NAME *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:GITHUB_REF_NAME @files --clobber
+          } else {
+            gh release create $env:GITHUB_REF_NAME @files --prerelease --generate-notes --title "NeonMon $env:VERSION"
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Could not attach the downloads to the release" }

@@ -46,6 +46,17 @@ internal enum MenuStyle
     Dark
 }
 
+// Values match the RegisterHotKey MOD_ flags.
+[Flags]
+internal enum HotkeyModifiers
+{
+    None = 0,
+    Alt = 1,
+    Control = 2,
+    Shift = 4,
+    Win = 8
+}
+
 internal enum HiddenMetric
 {
     Cpu,

@@ -149,6 +149,10 @@ internal abstract class WidgetForm : Form
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     internal Func<WidgetForm, bool>? CanReveal { get; set; }
 
+    // While a group reveal holds the pulse in Peek, leaving the hover zone does not hide it.
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal bool PeekHeld { get; set; }
+
     protected override bool ShowWithoutActivation => true;
 
     protected override CreateParams CreateParams
@@ -640,7 +644,7 @@ internal abstract class WidgetForm : Form
                 SetRevealState(RevealState.Peek);
             }
         }
-        else if (_state == RevealState.Peek && !inside && !IsMenuVisible)
+        else if (_state == RevealState.Peek && !inside && !IsMenuVisible && !PeekHeld)
         {
             HideTooltip();
             SetRevealState(RevealState.Hidden);

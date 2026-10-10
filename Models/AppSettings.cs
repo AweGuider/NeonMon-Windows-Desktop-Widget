@@ -30,6 +30,12 @@ internal sealed class AppSettings : StripSettings
     public int HiddenMetricSeconds { get; set; } = 15;
 
     public static int[] HiddenMetricSecondsChoices { get; } = [1, 5, 15, 30];
+    public bool PeekHotkeyEnabled { get; set; }
+    public HotkeyModifiers PeekHotkeyModifiers { get; set; } = DefaultPeekHotkeyModifiers;
+    public Keys PeekHotkeyKey { get; set; } = DefaultPeekHotkeyKey;
+
+    public const HotkeyModifiers DefaultPeekHotkeyModifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt;
+    public const Keys DefaultPeekHotkeyKey = Keys.Space;
     public QuotaSettings? Quota { get; set; }
 }
 

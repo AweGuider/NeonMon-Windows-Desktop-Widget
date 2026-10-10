@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.Runtime.InteropServices;
@@ -76,6 +77,22 @@ internal sealed class SettingsForm : Form
         }
 
         bitmap.Save(path);
+    }
+
+    // Set while a row records a key combination; it receives each key press and returns true when it used it.
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal Func<Keys, bool>? KeyCapture { get; set; }
+
+    // Runs before Alt combinations reach the system menu, so they can be recorded too.
+    protected override bool ProcessCmdKey(ref Message message, Keys keyData)
+    {
+        if (KeyCapture?.Invoke(keyData) == true)
+        {
+            Invalidate();
+            return true;
+        }
+
+        return base.ProcessCmdKey(ref message, keyData);
     }
 
     private float DpiScale => DeviceDpi / 96f;

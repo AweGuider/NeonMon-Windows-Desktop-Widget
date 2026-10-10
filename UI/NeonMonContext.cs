@@ -18,6 +18,11 @@ internal sealed class NeonMonContext : ApplicationContext
     private readonly ContextMenuStrip _quotaMenu;
     private readonly ContextMenuStrip _trayMenu;
     private readonly DarkMenuRenderer _darkMenuRenderer = new();
+    private readonly GroupReveal _groupReveal;
+    private HotkeyWindow? _hotkeyWindow;
+    private bool _recordingHotkey;
+    private bool _hotkeyTaken;
+    private string? _hotkeyRecordingHint;
     private SettingsForm? _settingsForm;
     private string? _sampleStatusLine;
     private List<string> _settingsDrives = [];
@@ -42,6 +47,7 @@ internal sealed class NeonMonContext : ApplicationContext
 
         SystemForm = new SystemPulseForm(settings, SaveSettings, telemetry);
         QuotaForm = new QuotaPulseForm(_quotaSettings, SaveSettings);
+        _groupReveal = new GroupReveal(() => Forms);
         foreach (var form in Forms)
         {
             form.CanReveal = CanReveal;
@@ -119,6 +125,9 @@ internal sealed class NeonMonContext : ApplicationContext
         }
 
         UpdateForegroundWatcher();
+        _hotkeyWindow = new HotkeyWindow();
+        _hotkeyWindow.Pressed += OnPeekHotkey;
+        ApplyPeekHotkey();
         _started = true;
     }
 
@@ -193,6 +202,7 @@ internal sealed class NeonMonContext : ApplicationContext
             return;
         }
 
+        _groupReveal.End();
         foreach (var form in Forms)
         {
             form.SetRevealState(RevealState.Hidden);
@@ -443,6 +453,8 @@ internal sealed class NeonMonContext : ApplicationContext
         _settingsDrives = TelemetryService.DriveNames();
         RefreshStartupState();
         _settingsForm = new SettingsForm(BuildSettingsPages, _trayIcon);
+        _settingsForm.Deactivate += (_, _) => StopHotkeyRecording();
+        _settingsForm.FormClosed += (_, _) => StopHotkeyRecording();
         _settingsForm.Show();
         _settingsForm.Activate();
     }
@@ -474,6 +486,14 @@ internal sealed class NeonMonContext : ApplicationContext
                 index => SetFullscreenBehavior((FullscreenBehavior)index)),
             new ToggleRow("Start with Windows", () => _startWithWindows, SetStartWithWindows,
                 _startupOtherCopy ? "Starts a copy in another folder. Turn off and on to use this one." : "Adds NeonMon to your Startup folder."),
+            new SectionRow("Hold to peek", "Hold the keys to show every pulse in Peek. Let go to hide them again."),
+            new ToggleRow("Use the hotkey", () => _settings.PeekHotkeyEnabled, SetPeekHotkeyEnabled),
+            new ActionRow("Hotkey", () => _recordingHotkey ? "Press the keys…" : PeekHotkeyText, _recordingHotkey ? "Cancel" : "Change",
+                ToggleHotkeyRecording, PeekHotkeyHint()),
+            .. IsDefaultPeekHotkey
+                ? Array.Empty<SettingsRow>()
+                : [new ActionRow("Default", () => HotkeyWindow.Describe(AppSettings.DefaultPeekHotkeyModifiers, AppSettings.DefaultPeekHotkeyKey),
+                    "Reset", ResetPeekHotkey)],
             new SectionRow("Advanced"),
             new ToggleRow($"HTML bridge · 127.0.0.1:{_settings.HtmlBridgePort}", () => _settings.HtmlBridgeEnabled, _ => ToggleBridge(),
                 "Local JSON for your own dashboards.")
@@ -638,6 +658,129 @@ internal sealed class NeonMonContext : ApplicationContext
                 on => SetPeekDrive(drive, on), _settingsDrives.Contains(drive, StringComparer.OrdinalIgnoreCase) ? null : "Not found.")),
             PeekValueRow("Uptime", PeekValues.Uptime, "Since the last power-on or wake.")
         ];
+    }
+
+    private string PeekHotkeyText => HotkeyWindow.Describe(_settings.PeekHotkeyModifiers, _settings.PeekHotkeyKey);
+
+    private bool IsDefaultPeekHotkey => _settings.PeekHotkeyModifiers == AppSettings.DefaultPeekHotkeyModifiers
+        && _settings.PeekHotkeyKey == AppSettings.DefaultPeekHotkeyKey;
+
+    private string? PeekHotkeyHint() => _recordingHotkey
+        ? _hotkeyRecordingHint ?? "Hold Ctrl, Alt, Shift or Win and press a key. Esc cancels."
+        : _hotkeyTaken ? "Another app already uses these keys. Pick others." : null;
+
+    private void ApplyPeekHotkey()
+    {
+        _groupReveal.End();
+        _hotkeyWindow?.Unregister();
+        _hotkeyTaken = false;
+        if (_hotkeyWindow is null || !_settings.PeekHotkeyEnabled || _recordingHotkey)
+        {
+            return;
+        }
+
+        _hotkeyTaken = !_hotkeyWindow.Register(_settings.PeekHotkeyModifiers, _settings.PeekHotkeyKey);
+    }
+
+    private void OnPeekHotkey()
+    {
+        if (HideForFullscreen)
+        {
+            return;
+        }
+
+        var modifiers = _settings.PeekHotkeyModifiers;
+        var key = _settings.PeekHotkeyKey;
+        _groupReveal.Begin(() => HotkeyWindow.IsHeld(modifiers, key));
+    }
+
+    private void SetPeekHotkeyEnabled(bool on)
+    {
+        _settings.PeekHotkeyEnabled = on;
+        SaveSettings();
+        ApplyPeekHotkey();
+        if (_hotkeyTaken)
+        {
+            ShowNotice($"{PeekHotkeyText} is already used by another app.");
+        }
+    }
+
+    private void ToggleHotkeyRecording()
+    {
+        if (_recordingHotkey)
+        {
+            StopHotkeyRecording();
+            return;
+        }
+
+        _recordingHotkey = true;
+        _hotkeyRecordingHint = null;
+        ApplyPeekHotkey();
+        if (_settingsForm is not null)
+        {
+            _settingsForm.KeyCapture = CaptureHotkey;
+        }
+    }
+
+    private void StopHotkeyRecording()
+    {
+        if (!_recordingHotkey)
+        {
+            return;
+        }
+
+        _recordingHotkey = false;
+        if (_settingsForm is not null)
+        {
+            _settingsForm.KeyCapture = null;
+        }
+
+        ApplyPeekHotkey();
+        _settingsForm?.Invalidate();
+    }
+
+    // A combination needs a modifier and one other key, so a bare key never stops working in other apps.
+    private bool CaptureHotkey(Keys keyData)
+    {
+        var key = keyData & Keys.KeyCode;
+        if (HotkeyWindow.IsModifierKey(key))
+        {
+            return true;
+        }
+
+        var modifiers = HotkeyModifiers.None;
+        if (keyData.HasFlag(Keys.Control)) modifiers |= HotkeyModifiers.Control;
+        if (keyData.HasFlag(Keys.Alt)) modifiers |= HotkeyModifiers.Alt;
+        if (keyData.HasFlag(Keys.Shift)) modifiers |= HotkeyModifiers.Shift;
+        if (HotkeyWindow.WinKeyDown()) modifiers |= HotkeyModifiers.Win;
+
+        if (modifiers == HotkeyModifiers.None)
+        {
+            if (key == Keys.Escape)
+            {
+                StopHotkeyRecording();
+            }
+            else
+            {
+                _hotkeyRecordingHint = $"{HotkeyWindow.Describe(modifiers, key)} alone would block that key everywhere. Add Ctrl, Alt, Shift or Win.";
+            }
+
+            return true;
+        }
+
+        _settings.PeekHotkeyModifiers = modifiers;
+        _settings.PeekHotkeyKey = key;
+        SaveSettings();
+        StopHotkeyRecording();
+        return true;
+    }
+
+    private void ResetPeekHotkey()
+    {
+        _settings.PeekHotkeyModifiers = AppSettings.DefaultPeekHotkeyModifiers;
+        _settings.PeekHotkeyKey = AppSettings.DefaultPeekHotkeyKey;
+        SaveSettings();
+        ApplyPeekHotkey();
     }
 
     private ToggleRow HiddenMetricRow(string label, HiddenMetric metric, string? hint = null) =>
@@ -969,7 +1112,8 @@ internal sealed class NeonMonContext : ApplicationContext
             }
         }
 
-        if (state == RevealState.Hidden)
+        // A group reveal shows pulses together, so one revealing must not hide the others.
+        if (state == RevealState.Hidden || _groupReveal.Active)
         {
             return;
         }
@@ -1102,6 +1246,8 @@ internal sealed class NeonMonContext : ApplicationContext
 
             _fullscreenWatcher?.Dispose();
             _foregroundWatcher?.Dispose();
+            _hotkeyWindow?.Dispose();
+            _groupReveal.Dispose();
             _quota.SnapshotUpdated -= QuotaForm.PostSnapshot;
             _tray.Visible = false;
             _tray.Dispose();

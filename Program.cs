@@ -298,8 +298,8 @@ internal static class Program
             && QuotaService.EndpointMaxAge(true, DateTimeOffset.MinValue, now, active) == TimeSpan.FromMinutes(2)
             && QuotaService.EndpointMaxAge(false, now.AddMinutes(-3), now, active) == active
             && QuotaService.EndpointMaxAge(false, DateTimeOffset.MinValue, now, active) == TimeSpan.FromMinutes(45)
-            && settings.ActiveRefresh(QuotaProvider.Codex) == TimeSpan.FromMinutes(2)
-            && settings.ActiveRefresh(QuotaProvider.Claude) == TimeSpan.FromMinutes(2)
+            && settings.ActiveRefresh(QuotaProvider.Codex) == TimeSpan.FromMinutes(10)
+            && settings.ActiveRefresh(QuotaProvider.Claude) == TimeSpan.FromMinutes(5)
             && QuotaService.Consumed(Used(40, reset), Used(41, reset.AddSeconds(30)))
             && !QuotaService.Consumed(Used(41, reset), Used(41, reset))
             && !QuotaService.Consumed(Used(90, reset), Used(5, reset.AddHours(5)));

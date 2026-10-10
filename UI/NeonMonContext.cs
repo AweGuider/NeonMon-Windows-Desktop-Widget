@@ -265,7 +265,6 @@ internal sealed class NeonMonContext : ApplicationContext
 
     private static QuotaSettings CreateDefaultQuotaSettings(AppSettings settings) => new()
     {
-        Size = WidgetSize.Small,
         DockEdge = settings.DockEdge,
         DockOffset = settings.DockOffset > 0.5 ? settings.DockOffset - 0.3 : settings.DockOffset + 0.3
     };

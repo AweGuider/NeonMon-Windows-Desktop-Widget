@@ -36,13 +36,13 @@ Claude Code is listed first and Codex second. Values count down from 100% remain
 
 ## Peek
 
-Hovering over a tab shows the headline numbers without opening the panel. Quota pulse shows each provider's 5-hour value, plus the weekly value on an amber chip when the weekly quota is the lower of the two. System pulse shows CPU, GPU, and memory load and free space on the system drive by default; a drive turns amber when it is nearly full. **Settings → System pulse → Peek** picks the values, including temperatures, other drives, and uptime.
+Hovering over a tab shows the headline numbers without opening the panel. Quota pulse shows each provider's 5-hour value, plus the weekly value on an amber chip when the weekly quota is the lower of the two. System pulse shows CPU and GPU load, free space on the system drive, and uptime by default; a drive turns amber when it is nearly full. **Settings → System pulse → Peek** picks the values, including temperatures, memory, and other drives.
 
 ![Quota pulse peek](images/quota-peek.png) &nbsp; ![System pulse peek](images/system-peek.png)
 
 ## Hidden tabs
 
-The hidden state is a small tab hanging off the screen edge: a dark body with bright bars, inside a light outer ring. The quota tab shows two lines, split into a Claude half and a Codex half with brand-colored circles at the ends: the weekly limit on the line nearest the screen edge, outlined in amber, and the 5-hour limit inside it. **Hidden tab → One line** in the Quota pulse menu switches back to a single line showing whichever limit is tighter.
+The hidden state is a small tab hanging off the screen edge: a dark body with bright bars, inside a light outer ring. The system tab shows CPU load on the inner line and GPU load on the line nearest the screen edge, averaged over 15 seconds; **Settings → System pulse → Hidden tab** picks up to two metrics, or none for a plain bar. The quota tab shows two lines, split into a Claude half and a Codex half with brand-colored circles at the ends: the weekly limit on the line nearest the screen edge, outlined in amber, and the 5-hour limit inside it. **Hidden tab → One line** in the Quota pulse menu switches back to a single line showing whichever limit is tighter.
 
 ![System pulse and Quota pulse hidden tabs, docked to the bottom edge](images/hidden-tabs.png)
 

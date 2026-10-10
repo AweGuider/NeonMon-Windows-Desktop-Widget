@@ -167,7 +167,8 @@ internal sealed class TelemetryService : IDisposable
 
     private TelemetrySnapshot Capture()
     {
-        var gpu = _nvml.Read();
+        // Clocks show only in the open Large layout and in the bridge's full snapshot.
+        var gpu = _nvml.Read(clocks: _active || _background);
         var msi = _active || _background || _peekTemperatures ? _msi.Read() : MsiTemperatureMetrics.Unavailable;
 
         if (_active && _topProcessCountdown-- <= 0)
@@ -247,7 +248,7 @@ internal sealed class TelemetryService : IDisposable
             case HiddenMetric.Cpu:
                 return _cpu.Read();
             case HiddenMetric.Gpu:
-                return _nvml.Read().Utilization;
+                return _nvml.ReadUtilization();
             case HiddenMetric.Memory:
                 var memory = new NativeMethods.MemoryStatusEx();
                 NativeMethods.GlobalMemoryStatusEx(memory);

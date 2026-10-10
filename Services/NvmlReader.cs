@@ -61,7 +61,12 @@ internal sealed class NvmlReader : IDisposable
         }
     }
 
-    public GpuMetrics Read()
+    // Clock queries cost about 2 ms of CPU each, against well under 1 ms for utilization, so callers skip them
+    // unless the clocks are shown.
+    public double ReadUtilization() =>
+        _initialized && _getUtilization is not null && _getUtilization(_device, out var usage) == Success ? usage.Gpu : 0;
+
+    public GpuMetrics Read(bool clocks)
     {
         if (!_initialized)
         {
@@ -83,12 +88,12 @@ internal sealed class NvmlReader : IDisposable
             temperature = temp;
         }
 
-        if (_getClock is not null && _getClock(_device, ClockGraphics, out var gpuClock) == Success)
+        if (clocks && _getClock is not null && _getClock(_device, ClockGraphics, out var gpuClock) == Success)
         {
             graphicsClock = gpuClock;
         }
 
-        if (_getClock is not null && _getClock(_device, ClockMemory, out var vramClock) == Success)
+        if (clocks && _getClock is not null && _getClock(_device, ClockMemory, out var vramClock) == Success)
         {
             memoryClock = vramClock;
         }

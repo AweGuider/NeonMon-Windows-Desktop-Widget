@@ -110,6 +110,12 @@ internal sealed class NeonMonContext : ApplicationContext
         _ = SystemForm.Handle;
         _ = QuotaForm.Handle;
         QuotaForm.SetSnapshot(_quota.RefreshLocal());
+        if (!QuotaForm.History.Codex.Backfilled)
+        {
+            Task.Run(CodexSessionReader.ReadWeeklyHistory).ContinueWith(task => QuotaForm.ApplyCodexBackfill(task.Result),
+                TaskContinuationOptions.OnlyOnRanToCompletion);
+        }
+
         _quota.Start();
         ShowStrips();
 

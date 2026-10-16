@@ -62,6 +62,52 @@ internal sealed class ProviderHistory
     public double DayTarget { get; set; }
     public List<QuestDay> Days { get; set; } = [];
     public List<FinishedWeek> Weeks { get; set; } = [];
+    public bool Backfilled { get; set; }
+
+    // Rebuilds finished weeks from past weekly readings, such as Codex session logs: each week's result is its highest reading.
+    public void Backfill(IEnumerable<(DateTimeOffset At, QuotaWindow Weekly)> readings, DateTimeOffset now)
+    {
+        Backfilled = true;
+        var weeks = new List<(DateTimeOffset EndedAt, double Used)>();
+        foreach (var (_, weekly) in readings
+            .Where(reading => reading.Weekly.ResetsAt is { } end && reading.At < end)
+            .OrderBy(reading => reading.Weekly.ResetsAt))
+        {
+            var end = weekly.ResetsAt!.Value;
+            if (weeks.Count > 0 && end - weeks[^1].EndedAt <= NewWeekGap)
+            {
+                weeks[^1] = (weeks[^1].EndedAt, Math.Max(weeks[^1].Used, weekly.UsedPercent));
+            }
+            else
+            {
+                weeks.Add((end, weekly.UsedPercent));
+            }
+        }
+
+        foreach (var (end, used) in weeks)
+        {
+            if (end > now)
+            {
+                if (WeekResetsAt is { } current && (end - current).Duration() <= NewWeekGap)
+                {
+                    WeekUsed = Math.Max(WeekUsed, used);
+                }
+
+                continue;
+            }
+
+            if (!Weeks.Any(week => (week.EndedAt - end).Duration() <= NewWeekGap))
+            {
+                Weeks.Add(new FinishedWeek(end, Math.Clamp(used, 0, 100)));
+            }
+        }
+
+        Weeks.Sort((first, second) => first.EndedAt.CompareTo(second.EndedAt));
+        if (Weeks.Count > QuotaHistory.KeptWeeks)
+        {
+            Weeks.RemoveRange(0, Weeks.Count - QuotaHistory.KeptWeeks);
+        }
+    }
 
     public bool Observe(ProviderQuota quota, DateTimeOffset now, TimeZoneInfo zone, out bool weekEnded)
     {
@@ -135,7 +181,7 @@ internal sealed class ProviderHistory
     public bool QuestDoneToday(DateTimeOffset now, TimeZoneInfo zone) =>
         Days.Any(day => day.Done && day.Date == LocalDate(now, zone));
 
-    // Seven days, oldest first. A week rarely starts at midnight, so it begins on the day holding most of its first 24 hours.
+    // Every calendar day the current week touches, oldest first: eight when the reset is not at midnight.
     public IReadOnlyList<QuestDayState> WeekDays(DateTimeOffset now, TimeZoneInfo zone)
     {
         if (WeekResetsAt is not { } resetsAt)
@@ -144,9 +190,9 @@ internal sealed class ProviderHistory
         }
 
         var today = LocalDate(now, zone);
-        var first = LocalDate(resetsAt.AddDays(-7).AddHours(12), zone);
+        var last = LocalDate(resetsAt.AddSeconds(-1), zone);
         var states = new List<QuestDayState>();
-        for (var date = first; date < first.AddDays(7); date = date.AddDays(1))
+        for (var date = LocalDate(resetsAt.AddDays(-7), zone); date <= last; date = date.AddDays(1))
         {
             var record = Days.Find(day => day.Date == date);
             states.Add(record is { Done: true } ? QuestDayState.Done
@@ -180,7 +226,7 @@ internal sealed class ProviderHistory
         var today = LocalDate(now, zone);
         var days = new List<QuestDay>();
         var index = 0;
-        for (var date = LocalDate(resetsAt.AddDays(-7).AddHours(12), zone); date < today; date = date.AddDays(1))
+        for (var date = LocalDate(resetsAt.AddDays(-7), zone); date < today; date = date.AddDays(1))
         {
             days.Add(new QuestDay(date, pastDays[index++ % pastDays.Length]));
         }

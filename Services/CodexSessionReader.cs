@@ -56,6 +56,44 @@ internal sealed class CodexSessionReader
         }
     }
 
+    // Every weekly reading in every session log, for rebuilding past weeks once. Slow on big logs, so call it off the UI thread.
+    public static IReadOnlyList<(DateTimeOffset At, QuotaWindow Weekly)> ReadWeeklyHistory()
+    {
+        var readings = new List<(DateTimeOffset, QuotaWindow)>();
+        try
+        {
+            if (!Directory.Exists(SessionsRoot))
+            {
+                return readings;
+            }
+
+            foreach (var path in Directory.EnumerateFiles(SessionsRoot, "rollout-*.jsonl", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    using var reader = new StreamReader(stream, Encoding.UTF8);
+                    while (reader.ReadLine() is { } line)
+                    {
+                        if (line.Contains("\"rate_limits\":{", StringComparison.Ordinal)
+                            && TryParseLine(line) is { Weekly: { } weekly, CapturedAt: { } at })
+                        {
+                            readings.Add((at, weekly));
+                        }
+                    }
+                }
+                catch (IOException)
+                {
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return readings;
+    }
+
     private static IEnumerable<string> RecentSessionFiles()
     {
         if (!Directory.Exists(SessionsRoot))

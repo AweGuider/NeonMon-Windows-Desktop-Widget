@@ -74,6 +74,21 @@ internal sealed class QuotaPulseForm : WidgetForm
 
     private bool WeeklyAlert(ProviderQuota quota, DateTimeOffset now) => MaxingOut && _quotaSettings.WeeklyEndsSoonAlert && quota.WeeklyEndsSoon(now);
 
+    internal void ApplyCodexBackfill(IReadOnlyList<(DateTimeOffset At, QuotaWindow Weekly)> readings)
+    {
+        if (IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        BeginInvoke(new Action(() =>
+        {
+            History.Codex.Backfill(readings, Clock());
+            HistoryChanged?.Invoke();
+            Invalidate();
+        }));
+    }
+
     internal void ShowResults(bool show)
     {
         _showResults = show;
@@ -267,14 +282,19 @@ internal sealed class QuotaPulseForm : WidgetForm
         return horizontal ? new Size(length, thickness) : new Size(thickness, length);
     }
 
+    // The Quota / Results switch is a bordered control, so the header is taller than System pulse's plain title.
+    protected override int HeaderHeight => 28 + (int)BodyShift;
+
+    private const float BodyShift = 4;
+
     protected override Size GetLogicalOpenSize(WidgetSize size) => (size, VisibleQuotas.Length == 2) switch
     {
-        (WidgetSize.Small, true) => new Size(400, 112),
-        (WidgetSize.Small, false) => new Size(400, 74),
-        (WidgetSize.Medium, true) => new Size(520, 140),
-        (WidgetSize.Medium, false) => new Size(520, 89),
-        (_, true) => new Size(660, 200),
-        _ => new Size(660, 120)
+        (WidgetSize.Small, true) => new Size(400, 112 + (int)BodyShift),
+        (WidgetSize.Small, false) => new Size(400, 74 + (int)BodyShift),
+        (WidgetSize.Medium, true) => new Size(520, 140 + (int)BodyShift),
+        (WidgetSize.Medium, false) => new Size(520, 89 + (int)BodyShift),
+        (_, true) => new Size(660, 200 + (int)BodyShift),
+        _ => new Size(660, 120 + (int)BodyShift)
     };
 
     protected override Size GetLogicalPeekSize(bool horizontal)
@@ -652,7 +672,7 @@ internal sealed class QuotaPulseForm : WidgetForm
 
         var scale = DeviceDpi / 96f;
         var x = 10 * scale;
-        var top = 5 * scale;
+        var top = (HeaderHeight - 18) / 2f * scale;
         var height = 18 * scale;
         var quotaWidth = MeasureText(graphics, "QUOTA", HeaderFont) + 16 * scale;
         var resultsWidth = MeasureText(graphics, "RESULTS", HeaderFont) + 16 * scale;
@@ -684,144 +704,119 @@ internal sealed class QuotaPulseForm : WidgetForm
 
     protected override void DrawBody(Graphics graphics)
     {
-        if (ResultsVisible)
-        {
-            _claudeLaunchArea = Rectangle.Empty;
-            _codexLaunchArea = Rectangle.Empty;
-            DrawResults(graphics);
-            return;
-        }
-
         var now = Clock();
         var scale = DeviceDpi / 96f;
-        Rectangle Area(float x, float y, float width, float height) =>
-            Rectangle.Round(new RectangleF(x * scale, y * scale, width * scale, height * scale));
-
         var visible = VisibleQuotas;
-        void SetLaunchAreas(float x, float firstY, float secondY, float width, float height)
+        var size = Settings.Size;
+        var (cardX, cardWidth, cardHeight, firstCard, secondCard, firstRow, secondRow) = size switch
         {
-            _claudeLaunchArea = Rectangle.Empty;
-            _codexLaunchArea = Rectangle.Empty;
-            for (var index = 0; index < visible.Length; index++)
+            WidgetSize.Small => (8f, 56f, 32f, 34f, 72f, 36f, 74f),
+            WidgetSize.Medium => (8f, 100f, 45f, 33f, 84f, 38f, 89f),
+            _ => (10f, 142f, 72f, 34f, 114f, 38f, 118f)
+        };
+
+        _claudeLaunchArea = Rectangle.Empty;
+        _codexLaunchArea = Rectangle.Empty;
+        for (var index = 0; index < visible.Length; index++)
+        {
+            var area = Rectangle.Round(new RectangleF(cardX * scale, ((index == 0 ? firstCard : secondCard) + BodyShift) * scale,
+                cardWidth * scale, cardHeight * scale));
+            if (visible[index].Provider == QuotaProvider.Claude)
             {
-                var area = Area(x, index == 0 ? firstY : secondY, width, height);
-                if (visible[index].Provider == QuotaProvider.Claude)
-                {
-                    _claudeLaunchArea = area;
-                }
-                else
-                {
-                    _codexLaunchArea = area;
-                }
+                _claudeLaunchArea = area;
+            }
+            else
+            {
+                _codexLaunchArea = area;
             }
         }
 
-        switch (Settings.Size)
+        DrawLaunchOutlines(graphics);
+        if (visible.Length == 2)
         {
-            case WidgetSize.Small:
-                SetLaunchAreas(8, 34, 72, 56, 32);
-                DrawLaunchOutlines(graphics);
-                DrawCompactRow(graphics, visible[0], now, 36 * scale, WidgetSize.Small);
-                if (visible.Length == 2)
-                {
-                    DrawCompactRow(graphics, visible[1], now, 74 * scale, WidgetSize.Small);
-                }
-
-                break;
-            case WidgetSize.Medium:
-                SetLaunchAreas(8, 33, 84, 100, 45);
-                DrawLaunchOutlines(graphics);
-                DrawCompactRow(graphics, visible[0], now, 38 * scale, WidgetSize.Medium);
-                if (visible.Length == 2)
-                {
-                    DrawCompactRow(graphics, visible[1], now, 89 * scale, WidgetSize.Medium);
-                }
-
-                break;
-            default:
-                SetLaunchAreas(10, 34, 114, 142, 72);
-                DrawLaunchOutlines(graphics);
-                DrawLargeRow(graphics, visible[0], now, 38 * scale);
-                if (visible.Length == 2)
-                {
-                    using (var divider = new Pen(Color.FromArgb(22, 75, 226, 246)))
-                    {
-                        graphics.DrawLine(divider, 16 * scale, 110 * scale, Width - 16 * scale, 110 * scale);
-                    }
-
-                    DrawLargeRow(graphics, visible[1], now, 118 * scale);
-                }
-
-                break;
-        }
-    }
-
-    private void DrawResults(Graphics graphics)
-    {
-        var now = Clock();
-        var scale = DeviceDpi / 96f;
-        var visible = VisibleQuotas;
-        var (firstTop, secondTop) = Settings.Size switch
-        {
-            WidgetSize.Small => (36f, 74f),
-            WidgetSize.Medium => (38f, 89f),
-            _ => (38f, 118f)
-        };
-
-        if (Settings.Size == WidgetSize.Large && visible.Length == 2)
-        {
+            var y = ((firstCard + cardHeight + secondCard) / 2f + BodyShift) * scale;
             using var divider = new Pen(Color.FromArgb(22, 75, 226, 246));
-            graphics.DrawLine(divider, 16 * scale, 110 * scale, Width - 16 * scale, 110 * scale);
+            graphics.DrawLine(divider, 16 * scale, y, Width - 16 * scale, y);
         }
 
         for (var index = 0; index < visible.Length; index++)
         {
-            var top = (index == 0 ? firstTop : secondTop) * scale;
-            switch (Settings.Size)
+            var quota = visible[index];
+            var top = ((index == 0 ? firstRow : secondRow) + BodyShift) * scale;
+            if (size == WidgetSize.Large)
             {
-                case WidgetSize.Small:
-                    DrawGlyph(graphics, visible[index].Provider, new RectangleF(14 * scale, top + 3 * scale, 15 * scale, 15 * scale));
-                    DrawQuestDots(graphics, visible[index], now, 72 * scale, top + 8 * scale, null);
-                    DrawLastWeekCompact(graphics, visible[index], new RectangleF(236 * scale, top, 150 * scale, 30 * scale), WidgetSize.Small);
-                    break;
-                case WidgetSize.Medium:
-                    DrawGlyph(graphics, visible[index].Provider, new RectangleF(14 * scale, top + 3 * scale, 15 * scale, 15 * scale));
-                    DrawText(graphics, ProviderName(visible[index]), LabelFont, Muted, new RectangleF(34 * scale, top + 4 * scale, 70 * scale, 14 * scale));
-                    DrawQuestDots(graphics, visible[index], now, 116 * scale, top + 4 * scale, 186 * scale);
-                    DrawLastWeekCompact(graphics, visible[index], new RectangleF(318 * scale, top, 188 * scale, 30 * scale), WidgetSize.Medium);
-                    break;
-                default:
-                    DrawLargeResultsRow(graphics, visible[index], now, top);
-                    break;
+                DrawLargeCard(graphics, quota, now, top);
+                if (ResultsVisible)
+                {
+                    DrawLargeResultsColumns(graphics, quota, now, top);
+                }
+                else
+                {
+                    DrawLargeColumns(graphics, quota, now, top);
+                }
+
+                continue;
             }
+
+            DrawCellOutlines(graphics, ((index == 0 ? firstCard : secondCard) + BodyShift) * scale, cardHeight * scale, size);
+            DrawCompactCard(graphics, quota, now, top, size);
+            var small = size == WidgetSize.Small;
+            var first = new RectangleF((small ? 72 : 116) * scale, top, (small ? 150 : 186) * scale, 30 * scale);
+            var second = new RectangleF((small ? 236 : 318) * scale, top, (small ? 150 : 188) * scale, 30 * scale);
+            if (ResultsVisible)
+            {
+                DrawQuestDots(graphics, quota, now, first.X, top + (small ? 8 : 4) * scale, small ? null : first.Width);
+                DrawLastWeekCompact(graphics, quota, now, second, size);
+            }
+            else
+            {
+                DrawCompactCell(graphics, quota, quota.FiveHour, now, first, fiveHour: true, size);
+                DrawCompactCell(graphics, quota, quota.Weekly, now, second, fiveHour: false, size);
+            }
+        }
+    }
+
+    // Faint outlines around the two metric cells of a Small or Medium row, lined up with the provider card.
+    private void DrawCellOutlines(Graphics graphics, float top, float height, WidgetSize size)
+    {
+        var scale = DeviceDpi / 96f;
+        var cells = size == WidgetSize.Small ? new[] { (68f, 158f), (232f, 158f) } : [(112f, 194f), (314f, 196f)];
+        using var pen = new Pen(Color.FromArgb(34, 75, 226, 246));
+        foreach (var (x, width) in cells)
+        {
+            using var path = RoundedRectangle(new RectangleF(x * scale + 0.5f, top + 0.5f, width * scale - 1, height - 1), 5 * scale);
+            graphics.DrawPath(pen, path);
         }
     }
 
     private static string ProviderName(ProviderQuota quota) => quota.Provider == QuotaProvider.Claude ? "CLAUDE" : "CODEX";
 
-    private void DrawLargeResultsRow(Graphics graphics, ProviderQuota quota, DateTimeOffset now, float top)
+    private void DrawLargeResultsColumns(Graphics graphics, ProviderQuota quota, DateTimeOffset now, float top)
     {
         var scale = DeviceDpi / 96f;
         var labelHeight = TextLineHeight(graphics, LabelFont, 2 * scale);
         var valueHeight = TextLineHeight(graphics, UptimeFont, 0);
         var detailHeight = TextLineHeight(graphics, DetailFont, 2 * scale);
-        DrawGlyph(graphics, quota.Provider, new RectangleF(16 * scale, top, 14 * scale, 14 * scale));
-        DrawText(graphics, ProviderName(quota), LabelFont, Muted, new RectangleF(35 * scale, top + scale, 100 * scale, labelHeight));
 
         DrawText(graphics, ShowsQuest ? "QUESTS THIS WEEK" : "QUESTS", LabelFont, Muted, new RectangleF(166 * scale, top, 146 * scale, labelHeight));
         DrawQuestDots(graphics, quota, now, 166 * scale, top + labelHeight + 6 * scale, 146 * scale);
 
         var history = History[quota.Provider];
-        DrawText(graphics, "LAST WEEK", LabelFont, Muted, new RectangleF(330 * scale, top, 146 * scale, labelHeight));
         var valueTop = top + labelHeight;
         var detailTop = valueTop + valueHeight + 8 * scale;
         if (history.Weeks.Count == 0)
         {
-            DrawText(graphics, "—", UptimeFont, Muted, new RectangleF(330 * scale, valueTop, 146 * scale, valueHeight + 2));
-            DrawText(graphics, "after the first weekly reset", DetailFont, Muted, new RectangleF(330 * scale, detailTop, 146 * scale, detailHeight));
+            // Until a week has finished, the current one keeps the column alive.
+            DrawText(graphics, "THIS WEEK SO FAR", LabelFont, Muted, new RectangleF(330 * scale, top, 146 * scale, labelHeight));
+            var current = CurrentWeekUsed(quota, now);
+            DrawText(graphics, current is { } used ? $"{used:0}%" : "—", UptimeFont, current is null ? Muted : Foreground,
+                new RectangleF(330 * scale, valueTop, 146 * scale, valueHeight + 2));
+            var left = quota.Weekly?.TimeLeft(now) is { } span ? $" · {FormatSpan(span)} left" : string.Empty;
+            DrawText(graphics, $"first week tracked{left}", DetailFont, Muted, new RectangleF(330 * scale, detailTop, 146 * scale, detailHeight));
         }
         else
         {
+            DrawText(graphics, "LAST WEEK", LabelFont, Muted, new RectangleF(330 * scale, top, 146 * scale, labelHeight));
             var used = history.Weeks[^1].Used;
             var maxed = MaxingOut && used >= _quotaSettings.MaxedAt;
             var value = $"{used:0}%";
@@ -846,10 +841,13 @@ internal sealed class QuotaPulseForm : WidgetForm
         }
 
         DrawText(graphics, "LAST 8 WEEKS", LabelFont, Muted, new RectangleF(494 * scale, top, 150 * scale, labelHeight));
-        DrawWeekBars(graphics, history, new RectangleF(494 * scale, top + labelHeight + 4 * scale, 150 * scale, 34 * scale));
+        DrawWeekBars(graphics, quota, now, new RectangleF(494 * scale, top + labelHeight + 4 * scale, 150 * scale, 34 * scale));
     }
 
-    private void DrawLastWeekCompact(Graphics graphics, ProviderQuota quota, RectangleF area, WidgetSize size)
+    private static double? CurrentWeekUsed(ProviderQuota quota, DateTimeOffset now) =>
+        quota.Weekly is { } weekly && !weekly.HasReset(now) ? weekly.Used(now) : null;
+
+    private void DrawLastWeekCompact(Graphics graphics, ProviderQuota quota, DateTimeOffset now, RectangleF area, WidgetSize size)
     {
         var scale = DeviceDpi / 96f;
         var history = History[quota.Provider];
@@ -858,8 +856,16 @@ internal sealed class QuotaPulseForm : WidgetForm
         var detailArea = new RectangleF(area.X, area.Y + valueHeight - detailHeight - 2 * scale, area.Width, detailHeight);
         if (history.Weeks.Count == 0)
         {
-            DrawText(graphics, "—", ValueFont, Muted, new RectangleF(area.X, area.Y, area.Width * 0.45f, valueHeight));
-            DrawTextRight(graphics, size == WidgetSize.Small ? "last wk" : "last week · after a reset", DetailFont, Muted, detailArea);
+            var current = CurrentWeekUsed(quota, now);
+            DrawText(graphics, current is { } soFar ? $"{soFar:0}%" : "—", ValueFont, current is null ? Muted : Foreground,
+                new RectangleF(area.X, area.Y, area.Width * 0.45f, valueHeight));
+            var left = quota.Weekly?.TimeLeft(now) is { } span ? $" · {FormatSpan(span)} left" : string.Empty;
+            DrawTextRight(graphics, size == WidgetSize.Small ? "this wk" : $"this week so far{left}", DetailFont, Muted, detailArea);
+            if (size == WidgetSize.Medium)
+            {
+                DrawWeekBars(graphics, quota, now, new RectangleF(area.X, area.Y + valueHeight + 3 * scale, area.Width, 9 * scale));
+            }
+
             return;
         }
 
@@ -877,7 +883,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         DrawTextRight(graphics, detail, DetailFont, maxed ? Ice : Muted, detailArea);
         if (size == WidgetSize.Medium)
         {
-            DrawWeekBars(graphics, history, new RectangleF(area.X, area.Y + valueHeight + 3 * scale, area.Width, 9 * scale));
+            DrawWeekBars(graphics, quota, now, new RectangleF(area.X, area.Y + valueHeight + 3 * scale, area.Width, 9 * scale));
         }
     }
 
@@ -950,14 +956,18 @@ internal sealed class QuotaPulseForm : WidgetForm
         DrawText(graphics, text, DetailFont, Muted, new RectangleF(x, y + size + 5 * scale, available, detailHeight));
     }
 
-    private void DrawWeekBars(Graphics graphics, ProviderHistory history, RectangleF area)
+    // Finished weeks, then the current week as an open bar that fills as it is used.
+    private void DrawWeekBars(Graphics graphics, ProviderQuota quota, DateTimeOffset now, RectangleF area)
     {
         var scale = DeviceDpi / 96f;
+        var history = History[quota.Provider];
+        var slots = QuotaHistory.KeptWeeks;
         var gap = 3 * scale;
-        var width = Math.Min(9 * scale, (area.Width - gap * (QuotaHistory.KeptWeeks - 1)) / QuotaHistory.KeptWeeks);
-        var offset = QuotaHistory.KeptWeeks - history.Weeks.Count;
+        var width = Math.Min(9 * scale, (area.Width - gap * (slots - 1)) / slots);
+        var finished = history.Weeks.TakeLast(slots - 1).ToList();
+        var offset = slots - 1 - finished.Count;
         using var empty = new SolidBrush(Track);
-        for (var i = 0; i < QuotaHistory.KeptWeeks; i++)
+        for (var i = 0; i < slots - 1; i++)
         {
             var x = area.X + i * (width + gap);
             if (i < offset)
@@ -966,12 +976,28 @@ internal sealed class QuotaPulseForm : WidgetForm
                 continue;
             }
 
-            var used = history.Weeks[i - offset].Used;
-            var color = !MaxingOut ? Cyan : used >= _quotaSettings.MaxedAt ? Ice : used >= 70 ? Cyan : Warning;
-            var height = Math.Max(2 * scale, area.Height * (float)Math.Clamp(used / 100, 0, 1));
-            using var brush = new SolidBrush(color);
-            graphics.FillRectangle(brush, x, area.Bottom - height, width, height);
+            var used = finished[i - offset].Used;
+            using var brush = new SolidBrush(!MaxingOut ? Cyan : used >= _quotaSettings.MaxedAt ? Ice : used >= 70 ? Cyan : Warning);
+            graphics.FillRectangle(brush, x, area.Bottom - BarHeight(used), width, BarHeight(used));
         }
+
+        var currentX = area.X + (slots - 1) * (width + gap);
+        if (CurrentWeekUsed(quota, now) is not { } current)
+        {
+            graphics.FillRectangle(empty, currentX, area.Bottom - 2 * scale, width, 2 * scale);
+            return;
+        }
+
+        var line = Math.Max(1f, scale);
+        using (var outline = new Pen(Color.FromArgb(150, Cyan), line) { DashStyle = DashStyle.Dash })
+        {
+            graphics.DrawRectangle(outline, currentX + line / 2f, area.Y + line / 2f, width - line, area.Height - line);
+        }
+
+        using var fill = new SolidBrush(Cyan);
+        graphics.FillRectangle(fill, currentX, area.Bottom - BarHeight(current), width, BarHeight(current));
+
+        float BarHeight(double used) => Math.Max(2 * scale, area.Height * (float)Math.Clamp(used / 100, 0, 1));
     }
 
     private void DrawLaunchOutlines(Graphics graphics)
@@ -1000,7 +1026,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         graphics.DrawPath(border, path);
     }
 
-    private void DrawCompactRow(Graphics graphics, ProviderQuota quota, DateTimeOffset now, float top, WidgetSize size)
+    private void DrawCompactCard(Graphics graphics, ProviderQuota quota, DateTimeOffset now, float top, WidgetSize size)
     {
         var scale = DeviceDpi / 96f;
         var small = size == WidgetSize.Small;
@@ -1030,13 +1056,6 @@ internal sealed class QuotaPulseForm : WidgetForm
             var age = IsMissing(quota) ? "CLI not installed" : note is null ? AgeText(quota, now) : note[^1];
             DrawText(graphics, age, DetailFont, IsMissing(quota) ? Muted : AgeColor(quota, now), new RectangleF(14 * scale, top + 23 * scale, 92 * scale, TextLineHeight(graphics, DetailFont, 2 * scale)));
         }
-
-        var firstX = (small ? 72 : 116) * scale;
-        var firstWidth = (small ? 150 : 186) * scale;
-        var secondX = (small ? 236 : 318) * scale;
-        var secondWidth = (small ? 150 : 188) * scale;
-        DrawCompactCell(graphics, quota, quota.FiveHour, now, new RectangleF(firstX, top, firstWidth, 30 * scale), fiveHour: true, size);
-        DrawCompactCell(graphics, quota, quota.Weekly, now, new RectangleF(secondX, top, secondWidth, 30 * scale), fiveHour: false, size);
     }
 
     private void DrawCompactCell(Graphics graphics, ProviderQuota quota, QuotaWindow? window, DateTimeOffset now, RectangleF area, bool fiveHour, WidgetSize size)
@@ -1069,7 +1088,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         return ((float)Math.Clamp(start / 100, 0, 1), (float)Math.Clamp((start + history.DayTarget) / 100, 0, 1));
     }
 
-    private void DrawLargeRow(Graphics graphics, ProviderQuota quota, DateTimeOffset now, float top)
+    private void DrawLargeCard(Graphics graphics, ProviderQuota quota, DateTimeOffset now, float top)
     {
         var scale = DeviceDpi / 96f;
         var labelHeight = TextLineHeight(graphics, LabelFont, 2 * scale);
@@ -1112,7 +1131,11 @@ internal sealed class QuotaPulseForm : WidgetForm
             DrawText(graphics, quota.Source, DetailFont, Muted, new RectangleF(left, lineTop, 132 * scale, detailHeight));
             DrawText(graphics, AgeText(quota, now), DetailFont, AgeColor(quota, now), new RectangleF(left, lineTop + 14 * scale, 132 * scale, detailHeight));
         }
+    }
 
+    private void DrawLargeColumns(Graphics graphics, ProviderQuota quota, DateTimeOffset now, float top)
+    {
+        var scale = DeviceDpi / 96f;
         var verb = ShowRemaining ? "LEFT" : "USED";
         var weeklyLabel = quota.Provider == QuotaProvider.Claude ? $"WEEKLY {verb} · ALL MODELS" : $"WEEKLY {verb}";
         DrawLargeCell(graphics, quota, quota.FiveHour, now, new RectangleF(166 * scale, top, 146 * scale, 64 * scale), $"5-HOUR {verb}", fiveHour: true);

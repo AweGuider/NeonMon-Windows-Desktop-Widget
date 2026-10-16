@@ -707,7 +707,7 @@ internal abstract class WidgetForm : Form
         {
             if (text is not null && !_tooltipVisible && Environment.TickCount64 - _tooltipHoverStarted >= 420)
             {
-                _toolTip.Show(text, this, point!.Value.X + 10, (int)Math.Round(28 * DeviceDpi / 96f) + 5, 4000);
+                _toolTip.Show(text, this, point!.Value.X + 10, (int)Math.Round(HeaderHeight * DeviceDpi / 96f) + 5, 4000);
                 _tooltipVisible = true;
             }
             return;
@@ -1155,7 +1155,8 @@ internal abstract class WidgetForm : Form
     private void DrawHeader(Graphics graphics)
     {
         var scale = DeviceDpi / 96f;
-        var headerHeight = (int)Math.Round(28 * scale);
+        var headerHeight = (int)Math.Round(HeaderHeight * scale);
+        var top = (HeaderHeight - 18) / 2f;
         using var linePen = new Pen(Color.FromArgb(30, 75, 226, 246));
         graphics.DrawLine(linePen, 10 * scale, headerHeight, Width - 10 * scale, headerHeight);
         DrawTitle(graphics);
@@ -1164,7 +1165,7 @@ internal abstract class WidgetForm : Form
         _sizeHitAreas.Clear();
         foreach (var size in Enum.GetValues<WidgetSize>())
         {
-            var rectangle = new Rectangle(x, (int)Math.Round(5 * scale), (int)Math.Round(22 * scale), (int)Math.Round(18 * scale));
+            var rectangle = new Rectangle(x, (int)Math.Round(top * scale), (int)Math.Round(22 * scale), (int)Math.Round(18 * scale));
             _sizeHitAreas[size] = rectangle;
             using var fill = new SolidBrush(size == Settings.Size ? Color.FromArgb(35, Cyan) : Color.Transparent);
             graphics.FillRectangle(fill, rectangle);
@@ -1172,17 +1173,19 @@ internal abstract class WidgetForm : Form
             x += (int)Math.Round(24 * scale);
         }
 
-        _dockHitArea = new Rectangle(x + (int)(2 * scale), (int)(5 * scale), (int)(22 * scale), (int)(18 * scale));
+        _dockHitArea = new Rectangle(x + (int)(2 * scale), (int)(top * scale), (int)(22 * scale), (int)(18 * scale));
         DrawCenteredText(graphics, DockGlyph(), IconFont, Ice, _dockHitArea);
         x += (int)Math.Round(25 * scale);
 
-        _pinHitArea = new Rectangle(x + (int)(2 * scale), (int)(5 * scale), (int)(22 * scale), (int)(18 * scale));
+        _pinHitArea = new Rectangle(x + (int)(2 * scale), (int)(top * scale), (int)(22 * scale), (int)(18 * scale));
         DrawCenteredText(graphics, Settings.KeepOpen ? "◆" : "◇", DetailFont, Settings.KeepOpen ? Cyan : Muted, _pinHitArea);
-        _hideHitArea = new Rectangle(x + (int)(27 * scale), (int)(5 * scale), (int)(22 * scale), (int)(18 * scale));
+        _hideHitArea = new Rectangle(x + (int)(27 * scale), (int)(top * scale), (int)(22 * scale), (int)(18 * scale));
         DrawCenteredText(graphics, "—", DetailFont, Muted, _hideHitArea);
-        _exitHitArea = new Rectangle(x + (int)(52 * scale), (int)(5 * scale), (int)(22 * scale), (int)(18 * scale));
+        _exitHitArea = new Rectangle(x + (int)(52 * scale), (int)(top * scale), (int)(22 * scale), (int)(18 * scale));
         DrawCenteredText(graphics, "×", IconFont, Warning, _exitHitArea);
     }
+
+    protected virtual int HeaderHeight => 28;
 
     protected virtual void DrawTitle(Graphics graphics)
     {

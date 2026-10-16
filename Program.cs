@@ -389,13 +389,33 @@ internal static class Program
             && quest is { Target: 15, Progress: 0, Done: false }
             && halfway is { Progress: 7, Done: false }
             && done
-            && week is [QuestDayState.Unknown, QuestDayState.Unknown, QuestDayState.Done, QuestDayState.Ahead, _, _, QuestDayState.Ahead]
+            && week is [QuestDayState.Unknown, QuestDayState.Unknown, QuestDayState.Done, QuestDayState.Ahead, _, _, _, QuestDayState.Ahead]
             && weekEnded && history.Weeks is [{ Used: 41 }] && history.Days.Count == 1
             && history.Quest(Weekly(3, reset.AddDays(7), nextWeek), nextWeek, zone) is { Target: > 13.8 and < 13.9 }
             && new ProviderHistory { Weeks = [new(reset, 80), new(reset, 96), new(reset, 99)] }.Streak(95) == 2
+            && SelfTestBackfill(reset)
             && Weekly(30, reset, morning).ProjectedWeeklyUsed(reset.AddDays(-3.5)) is > 59.9 and < 60.1
             && Weekly(40, reset, morning).WeeklyEndsSoon(reset.AddHours(-20))
             && !Weekly(80, reset, morning).WeeklyEndsSoon(reset.AddHours(-20));
+    }
+
+    private static bool SelfTestBackfill(DateTimeOffset reset)
+    {
+        (DateTimeOffset, QuotaWindow) Reading(double used, DateTimeOffset resetsAt, double daysBefore) =>
+            (resetsAt.AddDays(-daysBefore), new QuotaWindow(used, resetsAt, 10080));
+
+        var history = new ProviderHistory { WeekResetsAt = reset.AddDays(14), WeekUsed = 5 };
+        history.Backfill(
+        [
+            Reading(20, reset, 5), Reading(45, reset, 1),
+            Reading(60, reset.AddDays(7).AddSeconds(30), 4), Reading(90, reset.AddDays(7), 0.5),
+            Reading(12, reset.AddDays(14), 2),
+            Reading(70, reset.AddDays(7), -1)
+        ], reset.AddDays(12));
+
+        return history.Backfilled
+            && history.Weeks is [{ Used: 45 }, { Used: 90 }]
+            && history.WeekUsed == 12;
     }
 
     private static string? ArgumentValue(string[] args, string name)

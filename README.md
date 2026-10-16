@@ -17,14 +17,21 @@
   <a href="#quota-pulse-data-sources">Data sources</a> ·
   <a href="#download">Download</a> ·
   <a href="#build-from-source">Build from source</a> ·
+  <a href="#faq">FAQ</a> ·
   <a href="docs/gallery.md">Gallery</a> ·
   <a href="docs/devlog.md">Devlog</a> ·
   <a href="SECURITY.md">Security</a>
 </p>
 
+# NeonMon: Claude Code and Codex usage limits on your Windows desktop
+
+NeonMon is a free, open-source Windows 10/11 widget that shows how much of your Claude Code and Codex usage limits is left: the 5-hour session limit and the weekly limit, with reset times and a weekly pace marker. It also shows CPU, GPU, memory, and disk stats. It hides as a thin tab on the screen edge and opens on hover. No API key, no paid API calls.
+
+> Unofficial. NeonMon is not affiliated with, endorsed by, or sponsored by Anthropic or OpenAI.
+
 ## Why NeonMon
 
-NeonMon keeps system health and limited AI-agent quota visible at a glance without stealing focus, occupying the taskbar, or making you repeatedly open separate apps. You catch resource pressure early and always know how much Claude Code and Codex capacity is left, and when it resets, while you work.
+Without it, checking your machine or your quota means opening separate apps again and again. With the numbers always at hand, you catch resource pressure early and see a limit coming before it stops your work.
 
 ## What it is
 
@@ -38,11 +45,11 @@ It has two strips:
 | Hidden | Peek | Open |
 | --- | --- | --- |
 | A tab on the screen edge | Hover for the headline numbers | Click for the full panel |
-| ![Hidden tabs](docs/images/hidden-tabs.png) | ![Quota peek](docs/images/quota-peek.png) <br> ![System peek](docs/images/system-peek.png) | ![Quota pulse, small](docs/images/quota-small.png) |
+| ![NeonMon hidden as two thin tabs on the Windows screen edge](docs/images/hidden-tabs.png) | ![Quota pulse peek showing Claude Code and Codex usage remaining on hover](docs/images/quota-peek.png) <br> ![System pulse peek showing CPU and GPU load, free disk space, and uptime on hover](docs/images/system-peek.png) | ![Quota pulse small layout with Claude Code and Codex 5-hour and weekly limits and reset times](docs/images/quota-small.png) |
 
-![System pulse, large layout](docs/images/system-large.png)
+![System pulse large layout with uptime, CPU and GPU load, GPU temperature, memory, free space per drive, top CPU process, and GPU stability](docs/images/system-large.png)
 
-![Quota pulse, large layout](docs/images/quota-large.png)
+![Quota pulse large layout with Claude Code and Codex 5-hour and weekly usage limits, reset times, and a daily budget against weekly pace](docs/images/quota-large.png)
 
 More screenshots are in the [gallery](docs/gallery.md), and the [devlog](docs/devlog.md) shows how the UI evolved.
 
@@ -59,6 +66,16 @@ More screenshots are in the [gallery](docs/gallery.md), and the [devlog](docs/de
 - **No paid API usage:** Quota pulse never calls a model and never uses API keys (see below).
 - **Optional local JSON bridge** for your own dashboards.
 - **Update notice:** once a day NeonMon asks GitHub whether a newer release exists and tells you once per version. It reads the public release list only, sends no account or usage data, and never downloads or installs anything. Turn it off with **Settings → General → Check for updates**.
+
+## NeonMon vs the built-in ways
+
+| | NeonMon | `/usage` in Claude Code | `/status` in Codex | claude.ai usage page |
+| --- | --- | --- | --- | --- |
+| Visible while you work | Yes, a tab on the screen edge | No, run it in a session | No, run it in a session | No, open it in a browser |
+| Claude and Codex together | Yes | Claude only | Codex only | Claude only |
+| Reset times | Yes | Yes | Yes | Yes |
+| Weekly pace and daily quest | Yes | No | No | No |
+| System stats (CPU, GPU, memory, disk) | Yes | No | No | No |
 
 ## Quota pulse data sources
 
@@ -135,6 +152,32 @@ The bridge is disabled by default, binds only to `127.0.0.1`, and accepts no com
 - Native embeddable HTML component rather than JSON only.
 - Packaged installer.
 - Additional documented hardware sensor backends.
+
+## FAQ
+
+### How do I see my Claude Code usage limit on Windows?
+
+Run NeonMon and paste the status line from **Settings → Quota pulse → Copy setting** into `~/.claude/settings.json`. Your 5-hour and weekly limits then stay on the screen edge.
+
+### When does my Claude Code 5-hour limit reset?
+
+Quota pulse shows the reset time for both the 5-hour and the weekly limit, with a countdown, so you don't have to run `/usage`.
+
+### Does NeonMon use my API key or cost tokens?
+
+No. It reads data Claude Code and Codex already write on your machine and never calls a model. See [Quota pulse data sources](#quota-pulse-data-sources).
+
+### Does it work with the Claude desktop app?
+
+Not directly. The desktop app does not run status lines, so Claude values refresh when you use the `claude` CLI. An opt-in fallback can read the usage endpoint instead.
+
+### Does it show Codex usage limits too?
+
+Yes. Codex limits and reset credits show side by side with Claude, read from local session logs and a read-only call that does not consume quota.
+
+### Does it run on macOS or Linux?
+
+Not yet. NeonMon is Windows 10/11 only for now, and a macOS version is planned. Watch the repo's releases to hear when it's ready.
 
 ## Contributing
 

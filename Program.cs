@@ -88,6 +88,16 @@ internal static class Program
             previewQuota.ShowCodex = onlyProvider == QuotaProvider.Codex;
         }
 
+        if (rendering && Enum.TryParse<MinMaxGoal>(ArgumentValue(args, "--goal"), true, out var previewGoal) && settings.Quota is { } goalQuota)
+        {
+            goalQuota.Goal = previewGoal;
+        }
+
+        if (rendering && Enum.TryParse<LowQuotaColors>(ArgumentValue(args, "--colors"), true, out var previewColors) && settings.Quota is { } colorQuota)
+        {
+            colorQuota.LowQuotaColors = previewColors;
+        }
+
         var peekPreviewIndex = Array.FindIndex(args, argument => argument.Equals("--render-peek-preview", StringComparison.OrdinalIgnoreCase));
         if (peekPreviewIndex >= 0 && peekPreviewIndex + 1 < args.Length)
         {
@@ -106,6 +116,11 @@ internal static class Program
             }
 
             PreparePreview(context, telemetry, quota, useSample);
+            if (string.Equals(ArgumentValue(args, "--view"), "results", StringComparison.OrdinalIgnoreCase))
+            {
+                context.QuotaForm.ShowResults(true);
+            }
+
             var previewSize = previewIndex + 2 < args.Length && Enum.TryParse<WidgetSize>(args[previewIndex + 2], true, out var requestedSize)
                 ? requestedSize
                 : WidgetSize.Large;
@@ -217,6 +232,7 @@ internal static class Program
 
     private static void PreparePreview(NeonMonContext context, TelemetryService telemetry, QuotaService quota, bool useSample)
     {
+        context.QuotaForm.HistoryChanged = null;
         context.SystemForm.SetSnapshot(useSample ? TelemetrySnapshot.Sample : telemetry.Latest);
         if (useSample)
         {
@@ -225,7 +241,9 @@ internal static class Program
             var now = TelemetrySnapshot.Sample.CapturedAt;
             context.QuotaForm.Clock = () => now;
             context.QuotaForm.TimeZone = TimeZoneInfo.Utc;
-            context.QuotaForm.SetSnapshot(QuotaSnapshot.Sample(now));
+            var sample = QuotaSnapshot.Sample(now);
+            context.QuotaForm.History = QuotaHistory.Sample(sample, now, TimeZoneInfo.Utc);
+            context.QuotaForm.SetSnapshot(sample);
         }
         else
         {
@@ -361,6 +379,7 @@ internal static class Program
         var evening = morning.AddHours(9);
         history.Observe(Weekly(41, reset, evening), evening, zone, out _);
         var done = history.QuestDoneToday(evening, zone);
+        var week = history.WeekDays(evening, zone);
 
         var nextWeek = reset.AddHours(2);
         history.Observe(Weekly(3, reset.AddDays(7), nextWeek), nextWeek, zone, out var weekEnded);
@@ -370,6 +389,7 @@ internal static class Program
             && quest is { Target: 15, Progress: 0, Done: false }
             && halfway is { Progress: 7, Done: false }
             && done
+            && week is [QuestDayState.Unknown, QuestDayState.Unknown, QuestDayState.Done, QuestDayState.Ahead, _, _, QuestDayState.Ahead]
             && weekEnded && history.Weeks is [{ Used: 41 }] && history.Days.Count == 1
             && history.Quest(Weekly(3, reset.AddDays(7), nextWeek), nextWeek, zone) is { Target: > 13.8 and < 13.9 }
             && new ProviderHistory { Weeks = [new(reset, 80), new(reset, 96), new(reset, 99)] }.Streak(95) == 2

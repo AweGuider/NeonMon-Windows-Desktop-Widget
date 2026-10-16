@@ -50,7 +50,8 @@ internal sealed class NeonMonContext : ApplicationContext
         _quotaSettings = settings.Quota ??= CreateDefaultQuotaSettings(settings);
 
         SystemForm = new SystemPulseForm(settings, SaveSettings, telemetry);
-        QuotaForm = new QuotaPulseForm(_quotaSettings, SaveSettings);
+        QuotaForm = new QuotaPulseForm(_quotaSettings, SaveSettings) { History = QuotaHistoryStore.Load() };
+        QuotaForm.HistoryChanged = () => QuotaHistoryStore.Save(QuotaForm.History);
         _groupReveal = new GroupReveal(() => Forms);
         foreach (var form in Forms)
         {
@@ -530,6 +531,22 @@ internal sealed class NeonMonContext : ApplicationContext
                 "Two lines: weekly outside, 5-hour inside. One line: the tighter limit."),
             new ToggleRow("Reset time when low", () => _quotaSettings.PeekResetWhenLow, SetPeekResetWhenLow,
                 "Peek adds the reset time at 10% or less. At 0% it always shows."),
+            new SectionRow("Min-max", "Treat unused quota as the thing to avoid."),
+            new ChoiceRow("Goal", ["Max out", "Off"], () => (int)_quotaSettings.Goal, index => UpdateQuota(() => _quotaSettings.Goal = (MinMaxGoal)index),
+                "Off keeps the plain view and leaves Results as history."),
+            new ChoiceRow("Maxed means", [.. QuotaSettings.MaxedPercentChoices.Select(percent => $"{percent}%")],
+                () => Array.IndexOf(QuotaSettings.MaxedPercentChoices, (int)_quotaSettings.MaxedAt),
+                index => UpdateQuota(() => _quotaSettings.MaxedPercent = QuotaSettings.MaxedPercentChoices[index]), "Weekly use that counts as a win."),
+            new ToggleRow("Daily quest", () => _quotaSettings.DailyQuest, on => UpdateQuota(() => _quotaSettings.DailyQuest = on),
+                "Weekly left ÷ days to reset, set at midnight."),
+            new ToggleRow("Quest-done ring", () => _quotaSettings.QuestDoneRing, on => UpdateQuota(() => _quotaSettings.QuestDoneRing = on),
+                "Lights the provider dot on the hidden tab for the rest of the day."),
+            new ChoiceRow("Low-quota colours", ["Warn", "Reward"], () => (int)_quotaSettings.LowQuotaColors,
+                index => UpdateQuota(() => _quotaSettings.LowQuotaColors = (LowQuotaColors)index), "Reward turns low quota ice instead of amber and red."),
+            new ToggleRow("Results tab", () => _quotaSettings.ResultsTab, on => UpdateQuota(() => _quotaSettings.ResultsTab = on),
+                "Quota / Results switch in the header."),
+            new ToggleRow("Weekly ends soon alert", () => _quotaSettings.WeeklyEndsSoonAlert, on => UpdateQuota(() => _quotaSettings.WeeklyEndsSoonAlert = on),
+                "Highlights the last 24 hours of the week while 25% or more is left."),
             new SectionRow("Claude"),
             new ToggleRow("Show Claude", () => _quotaSettings.ShowClaude, on => SetProviderShown(QuotaProvider.Claude, on)),
             new ActionRow("Status line data", StatusLineStatus, "Copy setting", CopyStatusLineSetting,
@@ -1145,6 +1162,13 @@ internal sealed class NeonMonContext : ApplicationContext
     private void SetQuotaDisplay(QuotaDisplay display)
     {
         _quotaSettings.Display = display;
+        SaveSettings();
+        QuotaForm.RefreshDisplay();
+    }
+
+    private void UpdateQuota(Action change)
+    {
+        change();
         SaveSettings();
         QuotaForm.RefreshDisplay();
     }

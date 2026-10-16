@@ -26,7 +26,7 @@ internal sealed class QuotaHistory
 
     public static QuotaHistory Sample(QuotaSnapshot snapshot, DateTimeOffset now, TimeZoneInfo zone) => new()
     {
-        Claude = ProviderHistory.Sample(snapshot.Claude, now, zone, 84, 15, [true, true, false, true], [52, 78, 88, 47, 91, 98, 96, 97]),
+        Claude = ProviderHistory.Sample(snapshot.Claude, now, zone, 88, 15, [true, true, false, true], [52, 78, 88, 47, 91, 98, 96, 97]),
         Codex = ProviderHistory.Sample(snapshot.Codex, now, zone, 98, 16, [true, false, false, false], [35, 70, 31, 81, 55, 84, 62, 74]),
         ResultsUnseen = true
     };
@@ -135,7 +135,7 @@ internal sealed class ProviderHistory
     public bool QuestDoneToday(DateTimeOffset now, TimeZoneInfo zone) =>
         Days.Any(day => day.Done && day.Date == LocalDate(now, zone));
 
-    // One entry per calendar day the current week touches, oldest first.
+    // Seven days, oldest first. A week rarely starts at midnight, so it begins on the day holding most of its first 24 hours.
     public IReadOnlyList<QuestDayState> WeekDays(DateTimeOffset now, TimeZoneInfo zone)
     {
         if (WeekResetsAt is not { } resetsAt)
@@ -144,10 +144,9 @@ internal sealed class ProviderHistory
         }
 
         var today = LocalDate(now, zone);
-        var first = LocalDate(resetsAt.AddDays(-7), zone);
-        var last = LocalDate(resetsAt.AddSeconds(-1), zone);
+        var first = LocalDate(resetsAt.AddDays(-7).AddHours(12), zone);
         var states = new List<QuestDayState>();
-        for (var date = first; date <= last; date = date.AddDays(1))
+        for (var date = first; date < first.AddDays(7); date = date.AddDays(1))
         {
             var record = Days.Find(day => day.Date == date);
             states.Add(record is { Done: true } ? QuestDayState.Done
@@ -181,7 +180,7 @@ internal sealed class ProviderHistory
         var today = LocalDate(now, zone);
         var days = new List<QuestDay>();
         var index = 0;
-        for (var date = LocalDate(resetsAt.AddDays(-7), zone); date < today; date = date.AddDays(1))
+        for (var date = LocalDate(resetsAt.AddDays(-7).AddHours(12), zone); date < today; date = date.AddDays(1))
         {
             days.Add(new QuestDay(date, pastDays[index++ % pastDays.Length]));
         }

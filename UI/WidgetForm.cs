@@ -1158,9 +1158,7 @@ internal abstract class WidgetForm : Form
         var headerHeight = (int)Math.Round(28 * scale);
         using var linePen = new Pen(Color.FromArgb(30, 75, 226, 246));
         graphics.DrawLine(linePen, 10 * scale, headerHeight, Width - 10 * scale, headerHeight);
-        using var liveBrush = new SolidBrush(Cyan);
-        graphics.FillEllipse(liveBrush, 12 * scale, 10 * scale, 6 * scale, 6 * scale);
-        DrawText(graphics, Title, HeaderFont, Muted, new RectangleF(24 * scale, 6 * scale, 130 * scale, 16 * scale));
+        DrawTitle(graphics);
 
         var x = Width - (int)Math.Round(179 * scale);
         _sizeHitAreas.Clear();
@@ -1184,6 +1182,14 @@ internal abstract class WidgetForm : Form
         DrawCenteredText(graphics, "—", DetailFont, Muted, _hideHitArea);
         _exitHitArea = new Rectangle(x + (int)(52 * scale), (int)(5 * scale), (int)(22 * scale), (int)(18 * scale));
         DrawCenteredText(graphics, "×", IconFont, Warning, _exitHitArea);
+    }
+
+    protected virtual void DrawTitle(Graphics graphics)
+    {
+        var scale = DeviceDpi / 96f;
+        using var liveBrush = new SolidBrush(Cyan);
+        graphics.FillEllipse(liveBrush, 12 * scale, 10 * scale, 6 * scale, 6 * scale);
+        DrawText(graphics, Title, HeaderFont, Muted, new RectangleF(24 * scale, 6 * scale, 130 * scale, 16 * scale));
     }
 
     private string DockGlyph() => Settings.DockEdge switch

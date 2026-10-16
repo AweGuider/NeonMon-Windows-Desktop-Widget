@@ -33,7 +33,7 @@ NeonMon sits on the edge of your screen as a small tab. Hover over it for a quic
 It has two strips:
 
 - **System pulse** shows uptime, CPU and GPU load and temperature, memory, free disk space, the busiest process, and recent GPU-timeout diagnostics.
-- **Quota pulse** shows Claude Code and Codex 5-hour and weekly limits side by side, counting down from 100%, with reset times, a weekly pace marker, a daily budget, and Codex reset credits.
+- **Quota pulse** shows Claude Code and Codex 5-hour and weekly limits side by side, counting down from 100%, with reset times, a weekly pace marker, and Codex reset credits. Its min-max mode turns the week into a daily quest, so less quota goes unused, and a Results view shows quests this week, last week's result, and the last 8 weeks.
 
 | Hidden | Peek | Open |
 | --- | --- | --- |
@@ -54,6 +54,7 @@ More screenshots are in the [gallery](docs/gallery.md), and the [devlog](docs/de
 - **Readable anywhere:** the hidden tab pairs a dark body with a light ring, so it stays visible on white pages, bright video, and dark fullscreen video alike.
 - **Three layouts:** small, medium, and large for each strip.
 - **Your peek:** choose what System pulse shows on hover: load, temperatures, memory, any drive, and uptime.
+- **Min-max:** a daily quest splits what's left of the weekly limit across the days to reset. Finishing it lights the provider's dot on the hidden tab, and the last day of the week is flagged while a lot is left. Quest days and weekly results stay in a local file (**Settings → Quota pulse → Min-max**).
 - **Settings window:** every option grouped by pulse, and either pulse can be turned off if you only want one.
 - **No paid API usage:** Quota pulse never calls a model and never uses API keys (see below).
 - **Optional local JSON bridge** for your own dashboards.
@@ -103,7 +104,7 @@ dotnet build -c Release --no-restore -p:TargetPlatformDisplayName=Windows
 
 **Settings → General → Start with Windows** adds a shortcut to your Startup folder that starts this copy at sign-in; if you move the folder, turn it off and on again.
 
-Settings are stored in `%LOCALAPPDATA%\NeonMon\settings.json`. Launching NeonMon again opens the running copy instead of starting a second one, and `NeonMon.exe --exit` closes it.
+Settings are stored in `%LOCALAPPDATA%\NeonMon\settings.json`, and min-max quest days and weekly results in `quota-history.json` next to it. Launching NeonMon again opens the running copy instead of starting a second one, and `NeonMon.exe --exit` closes it.
 
 ## HTML integration
 

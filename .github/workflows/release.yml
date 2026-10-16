@@ -45,16 +45,36 @@ jobs:
           Compress-Archive -Path publish\small\* -DestinationPath "NeonMon-$env:VERSION.zip"
           Compress-Archive -Path publish\standalone\* -DestinationPath "NeonMon-$env:VERSION-standalone.zip"
 
+      # The notes are the tag's section of CHANGELOG.md, from its "## vX.Y.Z" heading to the next "## ".
+      # Without a section the release falls back to GitHub's generated notes.
+      - name: Read the release notes
+        shell: pwsh
+        run: |
+          $lines = Get-Content CHANGELOG.md -ErrorAction SilentlyContinue
+          $start = [array]::IndexOf([string[]]$lines, "## $env:GITHUB_REF_NAME")
+          if ($start -ge 0) {
+            $section = $lines | Select-Object -Skip ($start + 1) | ForEach-Object -Begin { $done = $false } -Process {
+              if ($_ -match '^## ') { $done = $true }
+              if (-not $done) { $_ }
+            }
+            ($section -join "`n").Trim() | Set-Content release-notes.md
+            "NOTES=release-notes.md" >> $env:GITHUB_ENV
+          } else {
+            Write-Warning "CHANGELOG.md has no '## $env:GITHUB_REF_NAME' section; using generated notes."
+          }
+
       - name: Attach to the release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $files = "NeonMon-$env:VERSION.zip", "NeonMon-$env:VERSION-standalone.zip"
+          $notes = if ($env:NOTES) { @('--notes-file', $env:NOTES) } else { @('--generate-notes') }
           gh release view $env:GITHUB_REF_NAME *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:GITHUB_REF_NAME @files --clobber
+            if ($LASTEXITCODE -eq 0 -and $env:NOTES) { gh release edit $env:GITHUB_REF_NAME --notes-file $env:NOTES }
           } else {
-            gh release create $env:GITHUB_REF_NAME @files --prerelease --generate-notes --title "NeonMon v$env:VERSION"
+            gh release create $env:GITHUB_REF_NAME @files --prerelease @notes --title "NeonMon v$env:VERSION"
           }
           if ($LASTEXITCODE -ne 0) { throw "Could not attach the downloads to the release" }

@@ -22,7 +22,7 @@ NeonMon can render any strip to a PNG with fixed sample data, which makes UI cha
 .\bin\Release\net9.0-windows\NeonMon.exe --render-preview quota.png Large --strip quota --state Peek --dock Top --sample
 ```
 
-Options: `--strip system|quota`, `--state Hidden|Peek|Open`, `--dock Top|Bottom|Left|Right`, and a size of `Small`, `Medium`, or `Large`. If a change is not meant to affect a view, its render should stay pixel-identical. Include before and after renders in pull requests that change the UI.
+Options: `--strip system|quota`, `--state Hidden|Peek|Open`, `--dock Top|Bottom|Left|Right`, and a size of `Small`, `Medium`, or `Large`. For Quota pulse, `--view results` renders the Results view, `--goal MaxOut|Off` sets min-max mode, and `--colors Warn|Reward` sets the low-quota colours. If a change is not meant to affect a view, its render should stay pixel-identical. Include before and after renders in pull requests that change the UI.
 
 ## Releasing
 

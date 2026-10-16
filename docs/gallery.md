@@ -22,6 +22,8 @@ All screenshots are rendered by NeonMon itself (`NeonMon.exe --render-preview <f
 
 Claude Code is listed first and Codex second. Values count down from 100% remaining. The tick on each bar marks where usage would be at an even pace through the window, the amber ▲ line is a "use it or lose it" hint (at least half the 5-hour quota is left but it resets within an hour), and the chip under Codex shows available reset credits and the earliest expiry.
 
+The Daily quest column is min-max mode: what's left of the weekly limit, divided by the days to the reset, with how far today has got. Small and Medium show today's quest as a lighter slice of the weekly bar.
+
 **Large**
 
 ![Quota pulse, large layout](images/quota-large.png)
@@ -33,6 +35,12 @@ Claude Code is listed first and Codex second. Values count down from 100% remain
 **Small**
 
 ![Quota pulse, small layout](images/quota-small.png)
+
+**Results**
+
+**Results** in the header shows quests this week (filled for done, amber for missed, dashed for today), last week's result and streak, and the last 8 weeks, with the current week as an open bar.
+
+![Quota pulse Results view, large layout](images/quota-results.png)
 
 ## Peek
 

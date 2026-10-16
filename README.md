@@ -49,7 +49,7 @@ It has two strips:
 
 ![System pulse large layout with uptime, CPU and GPU load, GPU temperature, memory, free space per drive, top CPU process, and GPU stability](docs/images/system-large.png)
 
-![Quota pulse large layout with Claude Code and Codex 5-hour and weekly usage limits, reset times, and a daily budget against weekly pace](docs/images/quota-large.png)
+![Quota pulse large layout with Claude Code and Codex 5-hour and weekly usage limits, reset times, and a daily quest for maxing out the weekly limit](docs/images/quota-large.png)
 
 More screenshots are in the [gallery](docs/gallery.md), and the [devlog](docs/devlog.md) shows how the UI evolved.
 

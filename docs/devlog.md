@@ -4,6 +4,18 @@ How NeonMon grew from a single system-monitor strip into a two-strip desktop wid
 
 [Back to the README](../README.md)
 
+## October 16, 2026: min-max (v0.9.0)
+
+The Quota pulse showed how much was left, but not whether you would use it before the reset. Min-max mode, on by default, turns the rest of the weekly limit into a daily quest. At midnight NeonMon divides what's left by the days to the reset. The Large layout shows today's progress with a plain verdict: on track to max out, how much will go unused at the current rate, or how much is left for today. Small and Medium mark today's slice on the weekly bar instead. Finishing the quest lights the provider's dot on the hidden tab for the rest of the day. The ahead and behind pace line is gone, because it was hard to read; with min-max off, the Large layout shows the daily budget on its own.
+
+![Quota pulse large layout with the Daily quest column](images/history-daily-quest.png)
+
+A Quota / Results switch in the header opens quests this week, last week's result with a streak of maxed weeks, and the last 8 weeks. Results keep the same provider cards as Quota, and until a week has finished they show the current week instead. History stays in `quota-history.json` on your machine. Past Codex weeks are rebuilt once from the local Codex session logs. Claude history starts on first run, because NeonMon never reads Claude transcripts.
+
+![Quota pulse Results view with quests, last week, and the last 8 weeks](images/history-results.png)
+
+The last 24 hours of a week are flagged while 25% or more is left, the same way the 5-hour use-it-or-lose-it hint works. **Low-quota colours → Reward** shows low quota in ice instead of amber and red. Everything is in **Settings → Quota pulse → Min-max**. Small and Medium rows also got faint outlines and a divider, so the two providers stay apart when the numbers are quiet.
+
 ## October 10, 2026: update notice and downloads (v0.8.0)
 
 Until now the only way to learn about a new version was to look at GitHub, and the only way to get one was to build it. Once a day NeonMon now reads the public release list and tells you once when a newer version exists; the tray menu and **Settings → Support** keep showing it until you update. It sends no account or usage data, downloads nothing, and **Settings → General → Check for updates** turns it off.

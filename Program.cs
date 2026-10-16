@@ -152,6 +152,11 @@ internal static class Program
                     return 8;
                 }
 
+                if (!SelfTestDailyQuest())
+                {
+                    return 9;
+                }
+
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
                 var json = client.GetStringAsync($"http://127.0.0.1:{bridge.Port}/api/v1/metrics").GetAwaiter().GetResult();
                 using var document = JsonDocument.Parse(json);
@@ -331,6 +336,46 @@ internal static class Program
             && UpdateChecker.ParseVersion("latest") is null
             && UpdateChecker.FindLatest("[]") is null
             && UpdateChecker.FindLatest("{\"message\":\"rate limited\"}") is null;
+    }
+
+    private static bool SelfTestDailyQuest()
+    {
+        var zone = TimeZoneInfo.Utc;
+        var reset = new DateTimeOffset(2026, 10, 17, 5, 0, 0, TimeSpan.Zero);
+        ProviderQuota Weekly(double used, DateTimeOffset resetsAt, DateTimeOffset at) => new()
+        {
+            Provider = QuotaProvider.Claude,
+            Weekly = new QuotaWindow(used, resetsAt, 10080),
+            CapturedAt = at
+        };
+
+        var history = new ProviderHistory();
+        var morning = new DateTimeOffset(2026, 10, 12, 9, 0, 0, TimeSpan.Zero);
+        var started = history.Observe(Weekly(25, reset, morning), morning, zone, out _);
+        var quest = history.Quest(Weekly(25, reset, morning), morning, zone);
+
+        var noon = morning.AddHours(3);
+        history.Observe(Weekly(32, reset, noon), noon, zone, out _);
+        var halfway = history.Quest(Weekly(32, reset, noon), noon, zone);
+
+        var evening = morning.AddHours(9);
+        history.Observe(Weekly(41, reset, evening), evening, zone, out _);
+        var done = history.QuestDoneToday(evening, zone);
+
+        var nextWeek = reset.AddHours(2);
+        history.Observe(Weekly(3, reset.AddDays(7), nextWeek), nextWeek, zone, out var weekEnded);
+
+        // Monday 09:00 to Saturday 05:00 touches five days, so 75% left makes a 15% quest.
+        return started
+            && quest is { Target: 15, Progress: 0, Done: false }
+            && halfway is { Progress: 7, Done: false }
+            && done
+            && weekEnded && history.Weeks is [{ Used: 41 }] && history.Days.Count == 1
+            && history.Quest(Weekly(3, reset.AddDays(7), nextWeek), nextWeek, zone) is { Target: > 13.8 and < 13.9 }
+            && new ProviderHistory { Weeks = [new(reset, 80), new(reset, 96), new(reset, 99)] }.Streak(95) == 2
+            && Weekly(30, reset, morning).ProjectedWeeklyUsed(reset.AddDays(-3.5)) is > 59.9 and < 60.1
+            && Weekly(40, reset, morning).WeeklyEndsSoon(reset.AddHours(-20))
+            && !Weekly(80, reset, morning).WeeklyEndsSoon(reset.AddHours(-20));
     }
 
     private static string? ArgumentValue(string[] args, string name)

@@ -40,6 +40,18 @@ internal enum HiddenTabStyle
     OneLine
 }
 
+internal enum MinMaxGoal
+{
+    MaxOut,
+    Off
+}
+
+internal enum LowQuotaColors
+{
+    Warn,
+    Reward
+}
+
 internal enum MenuStyle
 {
     Windows,

@@ -66,9 +66,17 @@ internal sealed record ProviderQuota
         ? Weekly.Remaining(now) / Math.Max(left.TotalDays, 1d / 24)
         : null;
 
-    public double? WeeklyPaceDelta(DateTimeOffset now) => Weekly?.TimeLeftFraction(now) is { } fraction
-        ? Weekly.Remaining(now) - fraction * 100
-        : null;
+    public bool WeeklyEndsSoon(DateTimeOffset now) =>
+        Weekly is { } weekly
+        && !weekly.HasReset(now)
+        && weekly.TimeLeft(now) is { } left && left <= TimeSpan.FromHours(24)
+        && weekly.Remaining(now) >= 25;
+
+    // Weekly use at reset if the rest of the week runs at the average rate so far; too early in the week to say is null.
+    public double? ProjectedWeeklyUsed(DateTimeOffset now) => Weekly is { } weekly && !weekly.HasReset(now)
+        && weekly.TimeLeftFraction(now) is { } fraction && 1 - fraction >= 0.1
+            ? Math.Min(100, weekly.Used(now) / (1 - fraction))
+            : null;
 
     public DateTimeOffset? EarliestCreditExpiry => ResetCredits
         .Where(credit => credit.ExpiresAt is not null)

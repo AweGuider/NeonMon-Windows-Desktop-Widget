@@ -805,13 +805,6 @@ internal sealed class QuotaPulseForm : WidgetForm
         var valueTop = area.Y + labelHeight;
         DrawText(graphics, value, ValueFont, quota.IsStale(now) ? Muted : Ice, new RectangleF(area.X, valueTop, valueWidth + 2, valueHeight));
         DrawText(graphics, "/day", DetailFont, Muted, new RectangleF(area.X + valueWidth + 4 * scale, valueTop + valueHeight - detailHeight - 2 * scale, 40 * scale, detailHeight));
-
-        if (quota.WeeklyPaceDelta(now) is { } delta)
-        {
-            var ahead = delta >= 0;
-            var text = ahead ? $"{delta:0}% ahead of pace" : $"{-delta:0}% behind pace";
-            DrawText(graphics, text, DetailFont, ahead ? Muted : Warning, new RectangleF(area.X, valueTop + valueHeight + 2 * scale, area.Width, detailHeight));
-        }
     }
 
     private void DrawBar(Graphics graphics, ProviderQuota quota, QuotaWindow? window, DateTimeOffset now, RectangleF track)

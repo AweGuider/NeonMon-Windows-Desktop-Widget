@@ -52,13 +52,25 @@ internal sealed class QuotaSettings : StripSettings
     public string CodexCliDirectory { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     public int ClaudeActiveRefreshMinutes { get; set; } = DefaultClaudeActiveRefreshMinutes;
     public int CodexActiveRefreshMinutes { get; set; } = DefaultCodexActiveRefreshMinutes;
+    public MinMaxGoal Goal { get; set; } = MinMaxGoal.MaxOut;
+    public int MaxedPercent { get; set; } = 95;
+    public bool DailyQuest { get; set; } = true;
+    public bool QuestDoneRing { get; set; } = true;
+    public LowQuotaColors LowQuotaColors { get; set; } = LowQuotaColors.Warn;
+    public bool ResultsTab { get; set; } = true;
+    public bool WeeklyEndsSoonAlert { get; set; } = true;
 
     public static int[] ActiveRefreshChoices { get; } = [2, 5, 10];
+    public static int[] MaxedPercentChoices { get; } = [90, 95, 100];
     public const int DefaultClaudeActiveRefreshMinutes = 5;
     public const int DefaultCodexActiveRefreshMinutes = 10;
 
     // With both providers off the pulse is disabled, so a layout never has to draw zero providers.
     public bool Shows(QuotaProvider provider) => (!ShowClaude && !ShowCodex) || (provider == QuotaProvider.Claude ? ShowClaude : ShowCodex);
+
+    public bool MaxingOut => Goal == MinMaxGoal.MaxOut;
+
+    public double MaxedAt => MaxedPercentChoices.Contains(MaxedPercent) ? MaxedPercent : 95;
 
     public TimeSpan ActiveRefresh(QuotaProvider provider)
     {

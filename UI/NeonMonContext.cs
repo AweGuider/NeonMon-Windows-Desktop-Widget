@@ -665,8 +665,28 @@ internal sealed class NeonMonContext : ApplicationContext
             new ActionRow("Source code", () => "GitHub", "Open", () => OpenUrl(RepositoryUrl)),
             new ActionRow("Report an issue", () => "GitHub issues", "Open", () => OpenUrl($"{RepositoryUrl}/issues/new/choose")),
             new ActionRow("Version", () => update is null ? version : $"{version} · {update.Version} available",
-                update is null ? "Release notes" : "Get update", () => OpenUrl(update?.PageUrl ?? UpdateChecker.ReleasesPage))
+                update is null ? "Release notes" : "Get update", () => OpenUrl(update?.PageUrl ?? UpdateChecker.ReleasesPage)),
+            // Only the installer puts an uninstaller next to NeonMon.exe; zip copies have none.
+            .. File.Exists(UninstallerPath)
+                ? [new ActionRow("Uninstall", () => "Installed for this user", "Uninstall", StartUninstaller,
+                    "Opens the Windows uninstaller. It asks whether to keep your settings.")]
+                : Array.Empty<SettingsRow>()
         ];
+    }
+
+    private static string UninstallerPath => Path.Combine(AppContext.BaseDirectory, "unins000.exe");
+
+    // The uninstaller asks for confirmation and closes NeonMon itself.
+    private void StartUninstaller()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(UninstallerPath) { UseShellExecute = true });
+        }
+        catch
+        {
+            ShowNotice("Could not start the uninstaller.");
+        }
     }
 
     private void OpenUrl(string url)

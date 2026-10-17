@@ -5,7 +5,8 @@ using System.Runtime.InteropServices;
 
 namespace NeonMon.UI;
 
-internal sealed record SettingsPage(string Title, IReadOnlyList<SettingsRow> Rows);
+// Pages that share a Group are listed as sub-pages under one navigation heading; a group with one page shows as a plain item.
+internal sealed record SettingsPage(string Title, IReadOnlyList<SettingsRow> Rows, string? Group = null);
 
 internal abstract record SettingsRow(string Label, string? Hint = null);
 
@@ -28,6 +29,12 @@ internal sealed class SettingsForm : Form
     private const int SectionHeight = 28;
     private const int RowHeight = 32;
     private const int HintHeight = 15;
+    private const int SectionGap = 14;
+    private const int NavItemHeight = 30;
+    private const int NavItemStep = 34;
+    private const int NavSubItemHeight = 26;
+    private const int NavSubItemStep = 28;
+    private const int NavSubIndent = 14;
 
     private static readonly Color Background = Color.FromArgb(7, 16, 21);
     private static readonly Color Foreground = Color.FromArgb(224, 246, 249);
@@ -39,7 +46,7 @@ internal sealed class SettingsForm : Form
 
     private readonly Func<IReadOnlyList<SettingsPage>> _pages;
     private readonly List<(Rectangle Area, Action Click)> _hitAreas = [];
-    private int _pageIndex;
+    private (string? Group, string? Title) _selected;
     private float _scroll;
     private RectangleF _track;
     private RectangleF _thumb;
@@ -50,6 +57,7 @@ internal sealed class SettingsForm : Form
     private Font _hintFont = null!;
     private Font _sectionFont = null!;
     private Font _valueFont = null!;
+    private Font _navSubFont = null!;
 
     public SettingsForm(Func<IReadOnlyList<SettingsPage>> pages, Icon icon)
     {
@@ -66,9 +74,13 @@ internal sealed class SettingsForm : Form
         ClientSize = new Size(Px(LogicalWidth), Px(LogicalHeight));
     }
 
-    internal void SavePreview(string path, int page)
+    // page is a page title or group prefix, optionally followed by /sub-page title: General, Quota, Quota/Min-max.
+    internal void SavePreview(string path, string page)
     {
-        _pageIndex = page;
+        var pages = _pages();
+        var parts = page.Split('/', 2);
+        Select(pages.FirstOrDefault(candidate => (candidate.Group ?? candidate.Title).StartsWith(parts[0], StringComparison.OrdinalIgnoreCase)
+            && (parts.Length == 1 || candidate.Title.Equals(parts[1], StringComparison.OrdinalIgnoreCase))) ?? pages[0]);
         using var bitmap = new Bitmap(ClientSize.Width, ClientSize.Height);
         using (var graphics = Graphics.FromImage(bitmap))
         {
@@ -86,13 +98,61 @@ internal sealed class SettingsForm : Form
     // Runs before Alt combinations reach the system menu, so they can be recorded too.
     protected override bool ProcessCmdKey(ref Message message, Keys keyData)
     {
-        if (KeyCapture?.Invoke(keyData) == true)
+        if (KeyCapture?.Invoke(keyData) == true || HandleNavigationKey(keyData))
         {
             Invalidate();
             return true;
         }
 
         return base.ProcessCmdKey(ref message, keyData);
+    }
+
+    private bool HandleNavigationKey(Keys keyData)
+    {
+        if (keyData is (Keys.Control | Keys.Tab) or (Keys.Control | Keys.Shift | Keys.Tab))
+        {
+            var pages = _pages();
+            var step = keyData.HasFlag(Keys.Shift) ? -1 : 1;
+            Select(pages[(SelectedIndex(pages) + step + pages.Count) % pages.Count]);
+            return true;
+        }
+
+        float? scroll = keyData switch
+        {
+            Keys.Up => _scroll - Px(RowHeight),
+            Keys.Down => _scroll + Px(RowHeight),
+            Keys.PageUp => _scroll - ClientSize.Height * 0.8f,
+            Keys.PageDown => _scroll + ClientSize.Height * 0.8f,
+            Keys.Home => 0,
+            Keys.End => float.MaxValue,
+            _ => null
+        };
+        if (scroll is null)
+        {
+            return false;
+        }
+
+        _scroll = scroll.Value;
+        return true;
+    }
+
+    private void Select(SettingsPage page)
+    {
+        _selected = (page.Group, page.Title);
+        _scroll = 0;
+    }
+
+    // Selection is kept by name, so it survives pages appearing or disappearing when a pulse is turned on or off.
+    private int SelectedIndex(IReadOnlyList<SettingsPage> pages)
+    {
+        var list = pages.ToList();
+        var index = list.FindIndex(page => page.Group == _selected.Group && page.Title == _selected.Title);
+        if (index < 0)
+        {
+            index = list.FindIndex(page => page.Group is not null && page.Group == _selected.Group);
+        }
+
+        return Math.Max(0, index);
     }
 
     private float DpiScale => DeviceDpi / 96f;
@@ -108,17 +168,19 @@ internal sealed class SettingsForm : Form
         _hintFont?.Dispose();
         _sectionFont?.Dispose();
         _valueFont?.Dispose();
+        _navSubFont?.Dispose();
         _labelFont = CreateFont("Segoe UI", 9.5f, FontStyle.Regular);
         _hintFont = CreateFont("Segoe UI", 8f, FontStyle.Regular);
         _sectionFont = CreateFont("Segoe UI", 7.5f, FontStyle.Bold);
         _valueFont = CreateFont("Consolas", 8.5f, FontStyle.Regular);
+        _navSubFont = CreateFont("Segoe UI", 9f, FontStyle.Regular);
     }
 
-    private float ContentHeight(SettingsPage page) => Px(page.Rows.Sum(RowLogicalHeight) + 2 * PagePadding);
+    private float ContentHeight(SettingsPage page) => Px(page.Rows.Select((row, i) => RowLogicalHeight(row, i == 0)).Sum() + 2 * PagePadding);
 
-    private static int RowLogicalHeight(SettingsRow row) => row switch
+    private static int RowLogicalHeight(SettingsRow row, bool first) => row switch
     {
-        SectionRow => SectionHeight + (row.Hint is null ? 0 : HintHeight),
+        SectionRow => (first ? 0 : SectionGap) + SectionHeight + (row.Hint is null ? 0 : HintHeight),
         _ => RowHeight + (row.Hint is null ? 0 : HintHeight)
     };
 
@@ -145,20 +207,21 @@ internal sealed class SettingsForm : Form
         _hitAreas.Clear();
 
         var pages = _pages();
-        _pageIndex = Math.Clamp(_pageIndex, 0, pages.Count - 1);
-        var page = pages[_pageIndex];
+        var selectedIndex = SelectedIndex(pages);
+        var page = pages[selectedIndex];
         var contentHeight = ContentHeight(page);
         _scroll = Math.Clamp(_scroll, 0, Math.Max(0, contentHeight - ClientSize.Height));
 
-        DrawNavigation(graphics, pages);
+        DrawNavigation(graphics, pages, selectedIndex);
         graphics.SetClip(new RectangleF(Px(NavWidth) + 1, 0, ClientSize.Width, ClientSize.Height));
         var y = Px(PagePadding) - _scroll;
-        foreach (var row in page.Rows)
+        for (var i = 0; i < page.Rows.Count; i++)
         {
-            var height = Px(RowLogicalHeight(row));
+            var row = page.Rows[i];
+            var height = Px(RowLogicalHeight(row, i == 0));
             if (y + height > 0 && y < ClientSize.Height)
             {
-                DrawRow(graphics, row, y);
+                DrawRow(graphics, row, y, i == 0);
             }
 
             y += height;
@@ -238,43 +301,63 @@ internal sealed class SettingsForm : Form
         }
     }
 
-    private void DrawNavigation(Graphics graphics, IReadOnlyList<SettingsPage> pages)
+    private void DrawNavigation(Graphics graphics, IReadOnlyList<SettingsPage> pages, int selectedIndex)
     {
         using (var line = new Pen(Line))
         {
             graphics.DrawLine(line, Px(NavWidth), 0, Px(NavWidth), ClientSize.Height);
         }
 
+        var y = (float)Px(PagePadding - 6);
         for (var i = 0; i < pages.Count; i++)
         {
-            var index = i;
-            var item = new RectangleF(Px(8), Px(PagePadding - 6 + i * 34), Px(NavWidth - 16), Px(30));
-            var selected = i == _pageIndex;
-            if (selected)
+            var page = pages[i];
+            var isSubPage = page.Group is not null && pages.Count(other => other.Group == page.Group) > 1;
+            if (isSubPage && (i == 0 || pages[i - 1].Group != page.Group))
             {
-                using var fill = new SolidBrush(Color.FromArgb(26, Cyan));
-                using var path = RoundedRectangle(item, Px(6));
-                graphics.FillPath(fill, path);
-                using var accent = new SolidBrush(Cyan);
-                graphics.FillRectangle(accent, item.X, item.Y + Px(6), Px(2), item.Height - Px(12));
+                var current = pages[selectedIndex].Group == page.Group;
+                DrawNavItem(graphics, page.Group!, page, y, NavItemHeight, 0, _labelFont, current ? Foreground : Muted, selected: false);
+                y += Px(NavItemStep);
             }
 
-            DrawText(graphics, pages[i].Title, _labelFont, selected ? Foreground : Muted,
-                new RectangleF(item.X + Px(12), item.Y, item.Width - Px(12), item.Height), StringAlignment.Center);
-            _hitAreas.Add((Rectangle.Round(item), () =>
-            {
-                _pageIndex = index;
-                _scroll = 0;
-            }));
+            var selected = i == selectedIndex;
+            DrawNavItem(graphics, isSubPage ? page.Title : page.Group ?? page.Title, page, y, isSubPage ? NavSubItemHeight : NavItemHeight,
+                isSubPage ? NavSubIndent : 0, isSubPage ? _navSubFont : _labelFont, selected ? Foreground : Muted, selected);
+            y += Px(isSubPage ? NavSubItemStep : NavItemStep);
         }
     }
 
-    private void DrawRow(Graphics graphics, SettingsRow row, float y)
+    private void DrawNavItem(Graphics graphics, string text, SettingsPage target, float y, int height, int indent, Font font, Color color,
+        bool selected)
+    {
+        var item = new RectangleF(Px(8), y, Px(NavWidth - 16), Px(height));
+        if (selected)
+        {
+            using var fill = new SolidBrush(Color.FromArgb(26, Cyan));
+            using var path = RoundedRectangle(item, Px(6));
+            graphics.FillPath(fill, path);
+            using var accent = new SolidBrush(Cyan);
+            graphics.FillRectangle(accent, item.X, item.Y + Px(6), Px(2), item.Height - Px(12));
+        }
+
+        var textLeft = item.X + Px(12 + indent);
+        DrawText(graphics, text, font, color, new RectangleF(textLeft, item.Y, item.Right - textLeft, item.Height), StringAlignment.Center);
+        _hitAreas.Add((Rectangle.Round(item), () => Select(target)));
+    }
+
+    private void DrawRow(Graphics graphics, SettingsRow row, float y, bool first)
     {
         var left = Px(NavWidth + PagePadding);
         var right = ClientSize.Width - Px(PagePadding);
         if (row is SectionRow)
         {
+            if (!first)
+            {
+                using var divider = new Pen(Line);
+                graphics.DrawLine(divider, left, y + Px(SectionGap - 4), right, y + Px(SectionGap - 4));
+                y += Px(SectionGap);
+            }
+
             DrawText(graphics, row.Label.ToUpperInvariant(), _sectionFont, Muted,
                 new RectangleF(left, y + Px(8), right - left, Px(SectionHeight - 8)), StringAlignment.Near);
             if (row.Hint is not null)
@@ -431,7 +514,8 @@ internal sealed class SettingsForm : Form
         if (_draggingThumb)
         {
             var range = _track.Height - _thumb.Height;
-            var contentRange = ContentHeight(_pages()[_pageIndex]) - ClientSize.Height;
+            var pages = _pages();
+            var contentRange = ContentHeight(pages[SelectedIndex(pages)]) - ClientSize.Height;
             ScrollTo(_dragStartScroll + (args.Y - _dragStartY) * (range > 0 ? contentRange / range : 0));
             return;
         }
@@ -466,6 +550,7 @@ internal sealed class SettingsForm : Form
             _hintFont?.Dispose();
             _sectionFont?.Dispose();
             _valueFont?.Dispose();
+            _navSubFont?.Dispose();
         }
 
         base.Dispose(disposing);

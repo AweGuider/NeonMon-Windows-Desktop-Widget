@@ -69,8 +69,7 @@ internal static class Program
         if (settingsPreviewIndex >= 0 && settingsPreviewIndex + 1 < args.Length)
         {
             var pageName = settingsPreviewIndex + 2 < args.Length ? args[settingsPreviewIndex + 2] : "General";
-            var page = Array.FindIndex(["General", "System", "Quota", "Support"], name => name.Equals(pageName, StringComparison.OrdinalIgnoreCase));
-            context.SaveSettingsPreview(args[settingsPreviewIndex + 1], Math.Max(0, page), useSample ? "updated 12 min ago" : null);
+            context.SaveSettingsPreview(args[settingsPreviewIndex + 1], pageName, useSample ? "updated 12 min ago" : null);
             return 0;
         }
 

@@ -1,6 +1,6 @@
 # Gallery
 
-All screenshots are rendered by NeonMon itself (`NeonMon.exe --render-preview <file> <size> --strip <system|quota> --state <Hidden|Peek|Open> --sample`, and `--render-settings <file> <General|System|Quota|Support> --sample` for the Settings window) at 125% scaling with fixed sample data, so they are reproducible and contain no live system data.
+All screenshots are rendered by NeonMon itself (`NeonMon.exe --render-preview <file> <size> --strip <system|quota> --state <Hidden|Peek|Open> --sample`, and `--render-settings <file> <General|System|Quota|Support>[/<sub-page>] --sample` for the Settings window, e.g. `Quota/Min-max`) at 125% scaling with fixed sample data, so they are reproducible and contain no live system data.
 
 [Back to the README](../README.md)
 
@@ -58,9 +58,9 @@ The hidden state is a small tab hanging off the screen edge: a dark body with br
 
 ## Settings
 
-**Settings…** in any menu opens a window with a page for each pulse, general options, and support links. The right-click menus can also switch to a dark style there.
+**Settings…** in any menu opens a window with general options, support links, and a page for each pulse, split into sub-pages such as Strip, Peek, Min-max, and one per quota provider. The right-click menus can also switch to a dark style there.
 
-![Settings window, Quota pulse page](images/settings.png)
+![Settings window, Quota pulse Min-max page](images/settings.png)
 
 The General page holds the options that apply to both pulses, including the hold-to-peek hotkey and the daily update check.
 

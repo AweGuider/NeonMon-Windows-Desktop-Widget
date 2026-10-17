@@ -487,7 +487,7 @@ internal sealed class NeonMonContext : ApplicationContext
         _settingsForm.Activate();
     }
 
-    internal void SaveSettingsPreview(string path, int page, string? sampleStatusLine)
+    internal void SaveSettingsPreview(string path, string page, string? sampleStatusLine)
     {
         _sampleStatusLine = sampleStatusLine;
         _settingsDrives = sampleStatusLine is null
@@ -507,13 +507,12 @@ internal sealed class NeonMonContext : ApplicationContext
         general.AddRange(Pulses.Select(pulse => new ToggleRow(pulse.Name, () => pulse.Form.Settings.Enabled, on => SetPulseEnabled(pulse.Form, on))));
         general.AddRange(
         [
-            new SectionRow("Appearance"),
-            new ChoiceRow("Menu style", ["Windows", "NeonMon dark"], () => (int)_settings.MenuStyle, SetMenuStyle, "Right-click and tray menus."),
             new SectionRow("Behaviour"),
             new ChoiceRow("Over fullscreen apps", ["Stay on top", "Hide"], () => (int)_settings.Fullscreen,
                 index => SetFullscreenBehavior((FullscreenBehavior)index)),
             new ToggleRow("Start with Windows", () => _startWithWindows, SetStartWithWindows,
                 _startupOtherCopy ? "Starts a copy in another folder. Turn off and on to use this one." : "Adds NeonMon to your Startup folder."),
+            new ChoiceRow("Menu style", ["Windows", "NeonMon dark"], () => (int)_settings.MenuStyle, SetMenuStyle, "Right-click and tray menus."),
             new SectionRow("Hold to peek", "Hold the keys to show every pulse in Peek. Let go to hide them again."),
             new ToggleRow("Use the hotkey", () => _settings.PeekHotkeyEnabled, SetPeekHotkeyEnabled),
             new ActionRow("Hotkey", () => _recordingHotkey ? "Press the keys…" : PeekHotkeyText, _recordingHotkey ? "Cancel" : "Change",
@@ -529,52 +528,80 @@ internal sealed class NeonMonContext : ApplicationContext
                 "Local JSON for your own dashboards.")
         ]);
 
-        var quota = StripRows(QuotaForm);
-        quota.AddRange(
-        [
-            new ChoiceRow("Show quota as", ["Remaining", "Used"], () => (int)_quotaSettings.Display, index => SetQuotaDisplay((QuotaDisplay)index)),
-            new ChoiceRow("Hidden tab", ["Two lines", "One line"], () => (int)_quotaSettings.HiddenTab, index => SetHiddenTab((HiddenTabStyle)index),
-                "Two lines: weekly outside, 5-hour inside. One line: the tighter limit."),
-            new ToggleRow("Reset time when low", () => _quotaSettings.PeekResetWhenLow, SetPeekResetWhenLow,
-                "Peek adds the reset time at 10% or less. At 0% it always shows."),
-            new SectionRow("Min-max", "Treat unused quota as the thing to avoid."),
-            new ChoiceRow("Goal", ["Max out", "Off"], () => (int)_quotaSettings.Goal, index => UpdateQuota(() => _quotaSettings.Goal = (MinMaxGoal)index),
-                "Off keeps the plain view and leaves Results as history."),
-            new ChoiceRow("Maxed means", [.. QuotaSettings.MaxedPercentChoices.Select(percent => $"{percent}%")],
-                () => Array.IndexOf(QuotaSettings.MaxedPercentChoices, (int)_quotaSettings.MaxedAt),
-                index => UpdateQuota(() => _quotaSettings.MaxedPercent = QuotaSettings.MaxedPercentChoices[index]), "Weekly use that counts as a win."),
-            new ToggleRow("Daily quest", () => _quotaSettings.DailyQuest, on => UpdateQuota(() => _quotaSettings.DailyQuest = on),
-                "Weekly left ÷ days to reset, set at midnight."),
-            new ToggleRow("Quest-done ring", () => _quotaSettings.QuestDoneRing, on => UpdateQuota(() => _quotaSettings.QuestDoneRing = on),
-                "Lights the provider dot on the hidden tab for the rest of the day."),
-            new ChoiceRow("Low-quota colours", ["Warn", "Reward"], () => (int)_quotaSettings.LowQuotaColors,
-                index => UpdateQuota(() => _quotaSettings.LowQuotaColors = (LowQuotaColors)index), "Reward turns low quota ice instead of amber and red."),
-            new ToggleRow("Results tab", () => _quotaSettings.ResultsTab, on => UpdateQuota(() => _quotaSettings.ResultsTab = on),
-                "Quota / Results switch in the header."),
-            new ToggleRow("Weekly ends soon alert", () => _quotaSettings.WeeklyEndsSoonAlert, on => UpdateQuota(() => _quotaSettings.WeeklyEndsSoonAlert = on),
-                "Highlights the last 24 hours of the week while 25% or more is left."),
-            new SectionRow("Claude"),
-            new ToggleRow("Show Claude", () => _quotaSettings.ShowClaude, on => SetProviderShown(QuotaProvider.Claude, on)),
-            new ActionRow("Status line data", StatusLineStatus, "Copy setting", CopyStatusLineSetting,
-                "Claude Code sends limits through its status line. Needs Node.js."),
-            new ToggleRow("Live endpoint fallback", () => _quotaSettings.ClaudeEndpointFallback, SetClaudeEndpointFallback,
-                "Uses your CLI sign-in when status line data is stale. Never calls a model."),
-            ActiveRefreshRow(QuotaProvider.Claude, "Endpoint reads while Claude is in use. Idle: every 45 min."),
-            new ActionRow("CLI folder", () => _quotaSettings.ClaudeCliDirectory, "Browse", () => ChooseCliFolder(QuotaProvider.Claude)),
-            new SectionRow("Codex"),
-            new ToggleRow("Show Codex", () => _quotaSettings.ShowCodex, on => SetProviderShown(QuotaProvider.Codex, on)),
-            ActiveRefreshRow(QuotaProvider.Codex, "Limit reads while Codex is in use. Idle: every 45 min."),
-            new ActionRow("CLI folder", () => _quotaSettings.CodexCliDirectory, "Browse", () => ChooseCliFolder(QuotaProvider.Codex))
-        ]);
-
         return
         [
             new SettingsPage("General", general),
-            new SettingsPage("System pulse", [.. StripRows(SystemForm), .. PeekRows()]),
-            new SettingsPage("Quota pulse", quota),
+            .. PulsePages(SystemForm,
+                new SettingsPage("Hidden tab", HiddenTabRows()),
+                new SettingsPage("Peek", PeekRows())),
+            .. PulsePages(QuotaForm,
+                new SettingsPage("Display", QuotaDisplayRows()),
+                new SettingsPage("Min-max", MinMaxRows()),
+                new SettingsPage("Claude", ClaudeRows()),
+                new SettingsPage("Codex", CodexRows())),
             new SettingsPage("Support", SupportRows())
         ];
     }
+
+    // A turned-off pulse keeps only its Strip page, which holds the switch to turn it back on.
+    private IEnumerable<SettingsPage> PulsePages(WidgetForm form, params SettingsPage[] pages)
+    {
+        var group = Pulses.First(pulse => pulse.Form == form).Name;
+        return [new SettingsPage("Strip", StripRows(form), group), .. form.Settings.Enabled ? pages.Select(page => page with { Group = group }) : []];
+    }
+
+    private List<SettingsRow> QuotaDisplayRows() =>
+    [
+        new SectionRow("Values"),
+        new ChoiceRow("Show quota as", ["Remaining", "Used"], () => (int)_quotaSettings.Display, index => SetQuotaDisplay((QuotaDisplay)index)),
+        new SectionRow("Hidden tab"),
+        new ChoiceRow("Tab lines", ["Two lines", "One line"], () => (int)_quotaSettings.HiddenTab, index => SetHiddenTab((HiddenTabStyle)index),
+            "Two: weekly outside, 5-hour inside. One: the tighter limit."),
+        new SectionRow("Peek"),
+        new ToggleRow("Reset time when low", () => _quotaSettings.PeekResetWhenLow, SetPeekResetWhenLow,
+            "Adds the reset time at 10% or less, and always at 0%.")
+    ];
+
+    private List<SettingsRow> MinMaxRows() =>
+    [
+        new SectionRow("Goal", "Treat unused quota as the thing to avoid."),
+        new ChoiceRow("Goal", ["Max out", "Off"], () => (int)_quotaSettings.Goal, index => UpdateQuota(() => _quotaSettings.Goal = (MinMaxGoal)index),
+            "Off keeps the plain view and leaves Results as history."),
+        new ChoiceRow("Maxed means", [.. QuotaSettings.MaxedPercentChoices.Select(percent => $"{percent}%")],
+            () => Array.IndexOf(QuotaSettings.MaxedPercentChoices, (int)_quotaSettings.MaxedAt),
+            index => UpdateQuota(() => _quotaSettings.MaxedPercent = QuotaSettings.MaxedPercentChoices[index]), "Weekly use that counts as a win."),
+        new ChoiceRow("Low-quota colours", ["Warn", "Reward"], () => (int)_quotaSettings.LowQuotaColors,
+            index => UpdateQuota(() => _quotaSettings.LowQuotaColors = (LowQuotaColors)index), "Reward turns low quota ice instead of amber and red."),
+        new SectionRow("Extras"),
+        new ToggleRow("Daily quest", () => _quotaSettings.DailyQuest, on => UpdateQuota(() => _quotaSettings.DailyQuest = on),
+            "Weekly left ÷ days to reset, set at midnight."),
+        new ToggleRow("Quest-done ring", () => _quotaSettings.QuestDoneRing, on => UpdateQuota(() => _quotaSettings.QuestDoneRing = on),
+            "Lights the provider dot on the hidden tab for the rest of the day."),
+        new ToggleRow("Results tab", () => _quotaSettings.ResultsTab, on => UpdateQuota(() => _quotaSettings.ResultsTab = on),
+            "Quota / Results switch in the header."),
+        new ToggleRow("Last-day alert", () => _quotaSettings.WeeklyEndsSoonAlert, on => UpdateQuota(() => _quotaSettings.WeeklyEndsSoonAlert = on),
+            "Highlights the last 24 hours of the week while 25% or more is left.")
+    ];
+
+    private List<SettingsRow> ClaudeRows() =>
+    [
+        new ToggleRow("Show Claude", () => _quotaSettings.ShowClaude, on => SetProviderShown(QuotaProvider.Claude, on)),
+        new ActionRow("Status line data", StatusLineStatus, "Copy setting", CopyStatusLineSetting,
+            "Claude Code sends limits through its status line. Needs Node.js."),
+        new SectionRow("Advanced"),
+        new ToggleRow("Live endpoint fallback", () => _quotaSettings.ClaudeEndpointFallback, SetClaudeEndpointFallback,
+            "Uses your CLI sign-in when status line data is stale. Never calls a model."),
+        ActiveRefreshRow(QuotaProvider.Claude, "Endpoint reads while Claude is in use. Idle: every 45 min."),
+        new ActionRow("CLI folder", () => _quotaSettings.ClaudeCliDirectory, "Browse", () => ChooseCliFolder(QuotaProvider.Claude))
+    ];
+
+    private List<SettingsRow> CodexRows() =>
+    [
+        new ToggleRow("Show Codex", () => _quotaSettings.ShowCodex, on => SetProviderShown(QuotaProvider.Codex, on)),
+        new SectionRow("Advanced"),
+        ActiveRefreshRow(QuotaProvider.Codex, "Limit reads while Codex is in use. Idle: every 45 min."),
+        new ActionRow("CLI folder", () => _quotaSettings.CodexCliDirectory, "Browse", () => ChooseCliFolder(QuotaProvider.Codex))
+    ];
 
     private static readonly Image CoffeeIcon = LoadAsset("coffee.png");
     private static readonly Image SmileyIcon = LoadAsset("smiley.png");
@@ -658,7 +685,6 @@ internal sealed class NeonMonContext : ApplicationContext
     {
         var rows = new List<SettingsRow>
         {
-            new SectionRow("Strip"),
             new ToggleRow("Show this pulse", () => form.Settings.Enabled, on => SetPulseEnabled(form, on))
         };
         if (!form.Settings.Enabled)
@@ -669,6 +695,7 @@ internal sealed class NeonMonContext : ApplicationContext
         var screens = Screen.AllScreens;
         rows.AddRange(
         [
+            new SectionRow("Placement"),
             new ChoiceRow("Size", ["S", "M", "L"], () => (int)form.Settings.Size, index => form.SetWidgetSize((WidgetSize)index)),
             new ChoiceRow("Dock edge", ["Top", "Bottom", "Left", "Right"], () => (int)form.Settings.DockEdge,
                 index => form.SetDockEdge((DockEdge)index)),
@@ -686,10 +713,10 @@ internal sealed class NeonMonContext : ApplicationContext
                     }
                 }),
             new ToggleRow("Keep open", () => form.Settings.KeepOpen, form.SetKeepOpen),
-            new SectionRow("Opacity"),
-            OpacityRow(form, "Hidden tab", StripSettings.HiddenOpacityChoices, settings => settings.HiddenOpacity,
-                (settings, value) => settings.HiddenOpacity = value, "The whole tab."),
-            OpacityRow(form, "Background", StripSettings.BackgroundOpacityChoices, settings => settings.BackgroundOpacity,
+            new SectionRow("Look"),
+            OpacityRow(form, "Tab opacity", StripSettings.HiddenOpacityChoices, settings => settings.HiddenOpacity,
+                (settings, value) => settings.HiddenOpacity = value, "The whole hidden tab."),
+            OpacityRow(form, "Background opacity", StripSettings.BackgroundOpacityChoices, settings => settings.BackgroundOpacity,
                 (settings, value) => settings.BackgroundOpacity = value, "Peek and open. Text and bars stay solid.")
         ]);
         return rows;
@@ -707,27 +734,27 @@ internal sealed class NeonMonContext : ApplicationContext
             },
             hint);
 
+    private List<SettingsRow> HiddenTabRows() =>
+    [
+        new SectionRow("Metrics", "Up to two. The first one you pick is the inner line."),
+        HiddenMetricRow("CPU load", HiddenMetric.Cpu),
+        HiddenMetricRow("GPU load", HiddenMetric.Gpu),
+        HiddenMetricRow("Memory", HiddenMetric.Memory),
+        HiddenMetricRow($"Drive {TelemetryService.SystemDrive} used", HiddenMetric.Drive),
+        new SectionRow("Smoothing"),
+        new ChoiceRow("Average over", [.. AppSettings.HiddenMetricSecondsChoices.Select(seconds => $"{seconds} s")],
+            () => Math.Max(0, Array.IndexOf(AppSettings.HiddenMetricSecondsChoices, _settings.HiddenMetricSeconds)),
+            index => SetHiddenMetricSeconds(AppSettings.HiddenMetricSecondsChoices[index]),
+            "Samples once a second while the tab is hidden.")
+    ];
+
     private List<SettingsRow> PeekRows()
     {
-        if (!_settings.Enabled)
-        {
-            return [];
-        }
-
         var chosen = _settings.PeekDrives ?? [TelemetryService.SystemDrive];
         var drives = _settingsDrives.Union(chosen, StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase);
         return
         [
-            new SectionRow("Hidden tab", "Up to two. The first one you pick is the inner line."),
-            HiddenMetricRow("CPU load", HiddenMetric.Cpu),
-            HiddenMetricRow("GPU load", HiddenMetric.Gpu),
-            HiddenMetricRow("Memory", HiddenMetric.Memory),
-            HiddenMetricRow($"Drive {TelemetryService.SystemDrive} used", HiddenMetric.Drive),
-            new ChoiceRow("Average over", [.. AppSettings.HiddenMetricSecondsChoices.Select(seconds => $"{seconds} s")],
-                () => Math.Max(0, Array.IndexOf(AppSettings.HiddenMetricSecondsChoices, _settings.HiddenMetricSeconds)),
-                index => SetHiddenMetricSeconds(AppSettings.HiddenMetricSecondsChoices[index]),
-                "Samples once a second while the tab is hidden."),
-            new SectionRow("Peek"),
+            new SectionRow("Values"),
             PeekValueRow("CPU load", PeekValues.Cpu),
             PeekValueRow("CPU temperature", PeekValues.CpuTemperature, "Needs a supported sensor (MSI today)."),
             PeekValueRow("GPU load", PeekValues.Gpu),

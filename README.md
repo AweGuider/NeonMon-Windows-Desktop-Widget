@@ -95,12 +95,22 @@ Values show remaining quota by default; switch to used quota with **Show quota a
 
 ## Download
 
-Each [release](https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget/releases) from v0.8.0 on has two downloads for 64-bit Windows 10/11:
+Each [release](https://github.com/AweGuider/NeonMon-Windows-Desktop-Widget/releases) has these downloads for 64-bit Windows 10/11 (installers start with the first release after v0.9.0):
 
-- `NeonMon-<version>.zip`: under 1 MB. Needs the [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0); Windows offers to install it if it is missing.
-- `NeonMon-<version>-standalone.zip`: about 45 MB, with .NET included. Nothing else to install, but it starts a little slower.
+| Download | Size | .NET |
+| --- | --- | --- |
+| `NeonMon-<version>-setup.exe` | about 2.5 MB | Needs the [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0) |
+| `NeonMon-<version>-standalone-setup.exe` | about 45 MB | Included |
+| `NeonMon-<version>.zip` | under 1 MB | Needs the .NET 9 Desktop Runtime |
+| `NeonMon-<version>-standalone.zip` | about 45 MB | Included |
 
-Unzip either one anywhere and run `NeonMon.exe`. The builds are not code-signed, so Windows SmartScreen may ask for confirmation the first time. To update, close NeonMon and unzip the new version over the old one; your settings are kept.
+The standalone builds need nothing else installed but start a little slower. Without the runtime, the small builds offer the download when they start.
+
+**Installer:** installs for your user only, without an admin prompt, into `%LOCALAPPDATA%\Programs\NeonMon`, and can turn on Start with Windows. To update, run the new installer; it closes NeonMon first, and you can switch between the small and standalone installers. Uninstall from **Settings → Apps**; it asks whether to delete your settings and quota history and keeps them unless you choose to delete.
+
+**Zip:** unzip anywhere and run `NeonMon.exe`. To update, close NeonMon and unzip the new version over the old one; your settings are kept.
+
+The downloads are not code-signed, so Windows SmartScreen may ask for confirmation the first time.
 
 ## Build from source
 
@@ -150,7 +160,6 @@ The bridge is disabled by default, binds only to `127.0.0.1`, and accepts no com
 - Warning thresholds.
 - History graphs and lightweight data export.
 - Native embeddable HTML component rather than JSON only.
-- Packaged installer.
 - Additional documented hardware sensor backends.
 
 ## FAQ

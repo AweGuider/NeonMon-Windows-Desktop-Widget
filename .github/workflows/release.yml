@@ -1,6 +1,6 @@
 name: Release
 
-# Pushing a tag such as v0.8.0 builds both downloads and attaches them to a pre-release for that tag.
+# Pushing a tag such as v0.8.0 builds the installers and zips and attaches them to a pre-release for that tag.
 on:
   push:
     tags: ['v*']
@@ -45,6 +45,26 @@ jobs:
           Compress-Archive -Path publish\small\* -DestinationPath "NeonMon-$env:VERSION.zip"
           Compress-Archive -Path publish\standalone\* -DestinationPath "NeonMon-$env:VERSION-standalone.zip"
 
+      # Pinned by hash so every release is built with the same Inno Setup.
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          $setup = "$env:RUNNER_TEMP\innosetup-7.1.0-x64.exe"
+          Invoke-WebRequest https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe -OutFile $setup
+          if ((Get-FileHash $setup -Algorithm SHA256).Hash -ne '0362A383ED217D4C4239B5933866DD96D3EB2102737DA92F80F6057A4B40DF2F') { throw 'The Inno Setup download does not match the pinned hash' }
+          $dir = "$env:RUNNER_TEMP\innosetup"
+          $process = Start-Process -FilePath $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=$dir" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installing Inno Setup failed with exit code $($process.ExitCode)" }
+          "ISCC=$dir\ISCC.exe" >> $env:GITHUB_ENV
+
+      - name: Build the installers
+        shell: pwsh
+        run: |
+          foreach ($build in 'small', 'standalone') {
+            & $env:ISCC /Q "/DAppVersion=$env:VERSION" "/DBuild=$build" installer\NeonMon.iss
+            if ($LASTEXITCODE -ne 0) { throw "Building the $build installer failed with exit code $LASTEXITCODE" }
+          }
+
       # The notes are the tag's section of CHANGELOG.md, from its "## vX.Y.Z" heading to the next "## ".
       # Without a section the release falls back to GitHub's generated notes.
       - name: Read the release notes
@@ -68,7 +88,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $files = "NeonMon-$env:VERSION.zip", "NeonMon-$env:VERSION-standalone.zip"
+          $files = "publish\NeonMon-$env:VERSION-setup.exe", "publish\NeonMon-$env:VERSION-standalone-setup.exe", "NeonMon-$env:VERSION.zip", "NeonMon-$env:VERSION-standalone.zip"
           $notes = if ($env:NOTES) { @('--notes-file', $env:NOTES) } else { @('--generate-notes') }
           gh release view $env:GITHUB_REF_NAME *> $null
           if ($LASTEXITCODE -eq 0) {

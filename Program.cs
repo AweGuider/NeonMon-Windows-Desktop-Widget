@@ -171,6 +171,11 @@ internal static class Program
                     return 9;
                 }
 
+                if (!SelfTestSounds())
+                {
+                    return 10;
+                }
+
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
                 var json = client.GetStringAsync($"http://127.0.0.1:{bridge.Port}/api/v1/metrics").GetAwaiter().GetResult();
                 using var document = JsonDocument.Parse(json);
@@ -396,6 +401,18 @@ internal static class Program
             && Weekly(30, reset, morning).ProjectedWeeklyUsed(reset.AddDays(-3.5)) is > 59.9 and < 60.1
             && Weekly(40, reset, morning).WeeklyEndsSoon(reset.AddHours(-20))
             && !Weekly(80, reset, morning).WeeklyEndsSoon(reset.AddHours(-20));
+    }
+
+    // Every cue has an embedded 48 kHz mono clip that stays short, and only hover and click play by default.
+    private static bool SelfTestSounds()
+    {
+        var defaults = new AudioSettings();
+        return Enum.GetValues<SoundCue>().All(cue => InteractionSounds.Load(cue).Length is > 0 and < 48000)
+            && defaults.Plays(SoundCue.Hover) && defaults.Plays(SoundCue.Click)
+            && !defaults.Plays(SoundCue.Peek) && !defaults.Plays(SoundCue.Open) && !defaults.Plays(SoundCue.Failure)
+            && defaults.EffectiveVolume == 80
+            && new AudioSettings { Volume = 33 }.EffectiveVolume == 80
+            && !new AudioSettings { Enabled = false }.Plays(SoundCue.Click);
     }
 
     private static bool SelfTestBackfill(DateTimeOffset reset)

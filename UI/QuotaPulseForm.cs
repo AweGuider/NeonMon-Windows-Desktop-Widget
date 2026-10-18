@@ -188,8 +188,27 @@ internal sealed class QuotaPulseForm : WidgetForm
         {
             CliRequested?.Invoke(provider);
         }
+        else
+        {
+            PlaySound(SoundCue.Failure);
+        }
 
         return true;
+    }
+
+    protected override string? GetBodyAction(Point point)
+    {
+        if (_quotaSettings.ResultsTab && _quotaTabArea.Contains(point))
+        {
+            return "quota tab";
+        }
+
+        if (_quotaSettings.ResultsTab && _resultsTabArea.Contains(point))
+        {
+            return "results tab";
+        }
+
+        return LaunchAreaAt(point) is { } provider ? $"launch {provider}" : null;
     }
 
     protected override string? GetBodyTooltip(Point point)

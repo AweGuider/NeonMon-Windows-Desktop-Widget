@@ -38,6 +38,31 @@ internal sealed class AppSettings : StripSettings
     public const HotkeyModifiers DefaultPeekHotkeyModifiers = HotkeyModifiers.Control | HotkeyModifiers.Shift;
     public const Keys DefaultPeekHotkeyKey = Keys.Space;
     public QuotaSettings? Quota { get; set; }
+    public AudioSettings? Audio { get; set; }
+}
+
+internal sealed class AudioSettings
+{
+    public bool Enabled { get; set; } = true;
+    public int Volume { get; set; } = 80;
+    public bool Hover { get; set; } = true;
+    public bool Click { get; set; } = true;
+    public bool Peek { get; set; }
+    public bool Reveal { get; set; }
+    public bool Results { get; set; }
+
+    public static int[] VolumeChoices { get; } = [20, 40, 60, 80, 100];
+
+    public int EffectiveVolume => VolumeChoices.Contains(Volume) ? Volume : 80;
+
+    public bool Plays(SoundCue cue) => Enabled && cue switch
+    {
+        SoundCue.Hover => Hover,
+        SoundCue.Click => Click,
+        SoundCue.Peek or SoundCue.Unpeek => Peek,
+        SoundCue.Open or SoundCue.Hide => Reveal,
+        _ => Results
+    };
 }
 
 internal sealed class QuotaSettings : StripSettings

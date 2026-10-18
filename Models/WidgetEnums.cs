@@ -77,6 +77,19 @@ internal enum HiddenMetric
     Drive
 }
 
+// Names match the embedded Assets/Sounds/<name>.wav files.
+internal enum SoundCue
+{
+    Hover,
+    Click,
+    Peek,
+    Unpeek,
+    Open,
+    Hide,
+    Success,
+    Failure
+}
+
 [Flags]
 internal enum PeekValues
 {

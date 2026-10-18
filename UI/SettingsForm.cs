@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.Runtime.InteropServices;
+using NeonMon.Models;
 
 namespace NeonMon.UI;
 
@@ -51,6 +52,7 @@ internal sealed class SettingsForm : Form
     private RectangleF _track;
     private RectangleF _thumb;
     private bool _draggingThumb;
+    private Rectangle _hoveredArea;
     private float _dragStartY;
     private float _dragStartScroll;
     private Font _labelFont = null!;
@@ -94,6 +96,9 @@ internal sealed class SettingsForm : Form
     // Set while a row records a key combination; it receives each key press and returns true when it used it.
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     internal Func<Keys, bool>? KeyCapture { get; set; }
+
+    // Raised after the click runs, so turning sounds on or changing the volume is heard at the new setting.
+    internal event Action<SoundCue>? SoundRequested;
 
     // Runs before Alt combinations reach the system menu, so they can be recorded too.
     protected override bool ProcessCmdKey(ref Message message, Keys keyData)
@@ -520,7 +525,22 @@ internal sealed class SettingsForm : Form
             return;
         }
 
-        Cursor = _hitAreas.Any(hit => hit.Area.Contains(args.Location)) ? Cursors.Hand : Cursors.Default;
+        var hovered = _hitAreas.FirstOrDefault(hit => hit.Area.Contains(args.Location)).Area;
+        Cursor = hovered.IsEmpty ? Cursors.Default : Cursors.Hand;
+        if (hovered != _hoveredArea)
+        {
+            _hoveredArea = hovered;
+            if (!hovered.IsEmpty)
+            {
+                SoundRequested?.Invoke(SoundCue.Hover);
+            }
+        }
+    }
+
+    protected override void OnMouseLeave(EventArgs args)
+    {
+        base.OnMouseLeave(args);
+        _hoveredArea = Rectangle.Empty;
     }
 
     protected override void OnMouseClick(MouseEventArgs args)
@@ -536,6 +556,7 @@ internal sealed class SettingsForm : Form
             if (hit.Area.Contains(args.Location))
             {
                 hit.Click();
+                SoundRequested?.Invoke(SoundCue.Click);
                 Invalidate();
                 return;
             }

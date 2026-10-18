@@ -229,6 +229,19 @@ internal sealed class SystemPulseForm : WidgetForm
         return false;
     }
 
+    protected override string? GetBodyAction(Point point)
+    {
+        foreach (var drive in _driveHitAreas)
+        {
+            if (drive.Value.Contains(point))
+            {
+                return $"drive {drive.Key}";
+            }
+        }
+
+        return _taskManagerHitAreas.Any(area => area.Contains(point)) ? "task manager" : null;
+    }
+
     protected override string? GetBodyTooltip(Point point)
     {
         foreach (var drive in _driveHitAreas)

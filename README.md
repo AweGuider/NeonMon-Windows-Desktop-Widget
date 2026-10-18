@@ -63,6 +63,7 @@ More screenshots are in the [gallery](docs/gallery.md), and the [devlog](docs/de
 - **Your peek:** choose what System pulse shows on hover: load, temperatures, memory, any drive, and uptime.
 - **Min-max:** a daily quest splits what's left of the weekly limit across the days to reset. Finishing it lights the provider's dot on the hidden tab, and the last day of the week is flagged while a lot is left. Quest days and weekly results stay in a local file (**Settings → Quota pulse → Min-max**).
 - **Settings window:** every option grouped by pulse, and either pulse can be turned off if you only want one.
+- **Quiet sounds:** a faint tick on hover and a soft wood-block click, with optional sounds for peeking, opening, success, and failure (**Settings → Audio**). They follow the Windows volume and never replace what the pulse shows.
 - **No paid API usage:** Quota pulse never calls a model and never uses API keys (see below).
 - **Optional local JSON bridge** for your own dashboards.
 - **Update notice:** once a day NeonMon asks GitHub whether a newer release exists and tells you once per version. It reads the public release list only, sends no account or usage data, and never downloads or installs anything. Turn it off with **Settings → General → Check for updates**.

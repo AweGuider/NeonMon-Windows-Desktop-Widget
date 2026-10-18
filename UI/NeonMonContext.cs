@@ -13,6 +13,9 @@ internal sealed class NeonMonContext : ApplicationContext
     private readonly QuotaService _quota;
     private readonly MetricsBridge _bridge;
     private readonly UpdateChecker _updates;
+    private readonly InteractionSounds _sounds;
+    private bool _quietReveals;
+    private bool _soundsHeld;
     private string? _noticeUrl;
     private readonly Icon _trayIcon;
     private readonly NotifyIcon _tray;
@@ -48,6 +51,7 @@ internal sealed class NeonMonContext : ApplicationContext
         _bridge = bridge;
         _quotaSettingsCreated = settings.Quota is null;
         _quotaSettings = settings.Quota ??= CreateDefaultQuotaSettings(settings);
+        _sounds = new InteractionSounds(() => Audio);
 
         SystemForm = new SystemPulseForm(settings, SaveSettings, telemetry);
         QuotaForm = new QuotaPulseForm(_quotaSettings, SaveSettings) { History = QuotaHistoryStore.Load() };
@@ -60,6 +64,7 @@ internal sealed class NeonMonContext : ApplicationContext
             form.LayoutCommitted += ResolveSpacing;
             form.ExitRequested += Exit;
             form.NoticeRequested += ShowNotice;
+            form.SoundRequested += PlaySound;
         }
 
         _quota.SnapshotUpdated += QuotaForm.PostSnapshot;
@@ -102,6 +107,31 @@ internal sealed class NeonMonContext : ApplicationContext
     public QuotaPulseForm QuotaForm { get; }
 
     private WidgetForm[] Forms => [SystemForm, QuotaForm];
+
+    private AudioSettings Audio => _settings.Audio ??= new AudioSettings();
+
+    // Only a running instance plays sounds, so renders and the self-test stay silent.
+    private void PlaySound(SoundCue cue)
+    {
+        var reveal = cue is SoundCue.Peek or SoundCue.Unpeek or SoundCue.Open or SoundCue.Hide;
+        if (_started && !_exiting && !(reveal && _quietReveals))
+        {
+            _sounds.Play(cue);
+        }
+    }
+
+    // Keeps the audio device warm only while something that can make a sound is on screen.
+    private void UpdateSoundHold()
+    {
+        var held = _started && !_exiting && Audio.Enabled
+            && (_settingsForm is { IsDisposed: false, Visible: true }
+                || Forms.Any(form => form.Visible && (form.State == RevealState.Open || (form.State == RevealState.Peek && Audio.Peek))));
+        if (held != _soundsHeld)
+        {
+            _soundsHeld = held;
+            _sounds.Hold(held);
+        }
+    }
 
     private WidgetForm? FirstEnabledForm => Forms.FirstOrDefault(form => form.Settings.Enabled);
 
@@ -212,7 +242,21 @@ internal sealed class NeonMonContext : ApplicationContext
 
     private bool HideForFullscreen => _fullscreen && _settings.Fullscreen == FullscreenBehavior.Hide;
 
+    // Fullscreen hides and restores the pulses on its own, which is not an interaction to hear.
     private void ApplyFullscreen()
+    {
+        _quietReveals = true;
+        try
+        {
+            ApplyFullscreenQuietly();
+        }
+        finally
+        {
+            _quietReveals = false;
+        }
+    }
+
+    private void ApplyFullscreenQuietly()
     {
         if (!HideForFullscreen)
         {
@@ -483,6 +527,9 @@ internal sealed class NeonMonContext : ApplicationContext
         _settingsForm = new SettingsForm(BuildSettingsPages, _trayIcon);
         _settingsForm.Deactivate += (_, _) => StopHotkeyRecording();
         _settingsForm.FormClosed += (_, _) => StopHotkeyRecording();
+        _settingsForm.SoundRequested += PlaySound;
+        _settingsForm.VisibleChanged += (_, _) => UpdateSoundHold();
+        _settingsForm.FormClosed += (_, _) => UpdateSoundHold();
         _settingsForm.Show();
         _settingsForm.Activate();
     }
@@ -539,8 +586,54 @@ internal sealed class NeonMonContext : ApplicationContext
                 new SettingsPage("Min-max", MinMaxRows()),
                 new SettingsPage("Claude", ClaudeRows()),
                 new SettingsPage("Codex", CodexRows())),
+            new SettingsPage("Audio", AudioRows()),
             new SettingsPage("Support", SupportRows())
         ];
+    }
+
+    private List<SettingsRow> AudioRows() =>
+    [
+        new SectionRow("Sound"),
+        new ToggleRow("Interaction sounds", () => Audio.Enabled, SetSoundsEnabled,
+            "Short sounds that echo what you see. Off means no audio work at all."),
+        .. Audio.Enabled
+            ? (SettingsRow[])
+            [
+                new ChoiceRow("Volume", [.. AudioSettings.VolumeChoices.Select(volume => $"{volume}%")],
+                    () => Array.IndexOf(AudioSettings.VolumeChoices, Audio.EffectiveVolume),
+                    index => UpdateAudio(() => Audio.Volume = AudioSettings.VolumeChoices[index]),
+                    "Follows the Windows volume and NeonMon's slider in the volume mixer."),
+                new SectionRow("Play a sound for"),
+                new ToggleRow("Hovering a button", () => Audio.Hover, on => UpdateAudio(() => Audio.Hover = on),
+                    "Once per new button, with a short cooldown."),
+                new ToggleRow("Clicking", () => Audio.Click, on => UpdateAudio(() => Audio.Click = on)),
+                new ToggleRow("Peeking", () => Audio.Peek, on => UpdateAudio(() => Audio.Peek = on, on ? SoundCue.Peek : null),
+                    "When a pulse peeks out and tucks back in."),
+                new ToggleRow("Opening and hiding a pulse", () => Audio.Reveal, on => UpdateAudio(() => Audio.Reveal = on, on ? SoundCue.Open : null)),
+                new ToggleRow("Success and failure", () => Audio.Results, on => UpdateAudio(() => Audio.Results = on, on ? SoundCue.Success : null),
+                    "CLI launched, or an action that could not run.")
+            ]
+            : []
+    ];
+
+    private void SetSoundsEnabled(bool enabled)
+    {
+        UpdateAudio(() => Audio.Enabled = enabled);
+        if (!enabled)
+        {
+            _sounds.Release();
+        }
+    }
+
+    private void UpdateAudio(Action change, SoundCue? preview = null)
+    {
+        change();
+        SaveSettings();
+        UpdateSoundHold();
+        if (preview is { } cue)
+        {
+            _sounds.Play(cue, preview: true);
+        }
     }
 
     // A turned-off pulse keeps only its Strip page, which holds the switch to turn it back on.
@@ -1167,6 +1260,10 @@ internal sealed class NeonMonContext : ApplicationContext
         {
             ShowNotice($"Could not open a terminal for the {name} CLI.");
         }
+        else
+        {
+            PlaySound(SoundCue.Success);
+        }
     }
 
     private void SetClaudeEndpointFallback(bool enabled)
@@ -1236,6 +1333,7 @@ internal sealed class NeonMonContext : ApplicationContext
 
     private void OnRevealStateChanged(WidgetForm form, RevealState state)
     {
+        UpdateSoundHold();
         if (ReferenceEquals(form, QuotaForm))
         {
             _quota.SetActive(state != RevealState.Hidden);
@@ -1338,6 +1436,7 @@ internal sealed class NeonMonContext : ApplicationContext
     {
         _noticeUrl = null;
         _tray.ShowBalloonTip(2500, "NeonMon", text, ToolTipIcon.Warning);
+        PlaySound(SoundCue.Failure);
     }
 
     private void SaveSettings()
@@ -1396,6 +1495,7 @@ internal sealed class NeonMonContext : ApplicationContext
             _systemMenu.Dispose();
             _quotaMenu.Dispose();
             _trayMenu.Dispose();
+            _sounds.Dispose();
         }
 
         base.Dispose(disposing);

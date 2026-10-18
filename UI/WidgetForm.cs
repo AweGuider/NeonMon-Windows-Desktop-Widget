@@ -43,6 +43,7 @@ internal abstract class WidgetForm : Form
     private Rectangle _hideHitArea;
     private Rectangle _exitHitArea;
     private string? _hoveredTooltip;
+    private string? _hoveredAction;
     private bool _tooltipVisible;
     private long _tooltipHoverStarted;
     private RevealState _state = RevealState.Hidden;
@@ -125,7 +126,11 @@ internal abstract class WidgetForm : Form
                 SetRevealState(RevealState.Peek);
             }
         };
-        MouseLeave += (_, _) => HideTooltip();
+        MouseLeave += (_, _) =>
+        {
+            HideTooltip();
+            _hoveredAction = null;
+        };
         MouseDown += HandleMouseDown;
         MouseMove += HandleMouseMove;
         MouseUp += HandleMouseUp;
@@ -142,6 +147,7 @@ internal abstract class WidgetForm : Form
     internal event Action<WidgetForm>? LayoutCommitted;
     internal event Action? ExitRequested;
     internal event Action<string>? NoticeRequested;
+    internal event Action<SoundCue>? SoundRequested;
 
     internal StripSettings Settings { get; }
     internal RevealState State => _state;
@@ -192,11 +198,16 @@ internal abstract class WidgetForm : Form
 
     protected virtual string? GetBodyTooltip(Point point) => null;
 
+    // Names the clickable element under the point; the hover sound plays once each time this changes.
+    protected virtual string? GetBodyAction(Point point) => null;
+
     protected virtual void OnRevealStateChanged(RevealState state)
     {
     }
 
     protected void ShowNotice(string text) => NoticeRequested?.Invoke(text);
+
+    protected void PlaySound(SoundCue cue) => SoundRequested?.Invoke(cue);
 
     // Fonts are sized in pixels for this window's monitor; GDI+ point sizes would follow the primary monitor's DPI.
     protected Font CreateFont(string family, float points, FontStyle style) =>
@@ -321,7 +332,23 @@ internal abstract class WidgetForm : Form
             return;
         }
 
+        var previous = _state;
         _state = state;
+        _hoveredAction = null;
+        SoundCue? cue = (previous, state) switch
+        {
+            _ when previous == state => null,
+            (RevealState.Hidden, RevealState.Peek) => SoundCue.Peek,
+            (RevealState.Peek, RevealState.Hidden) => SoundCue.Unpeek,
+            (_, RevealState.Open) => SoundCue.Open,
+            (RevealState.Open, _) => SoundCue.Hide,
+            _ => null
+        };
+        if (cue is { } revealCue)
+        {
+            PlaySound(revealCue);
+        }
+
         _hoverTimer.Interval = state == RevealState.Hidden ? HiddenHoverInterval : RevealedHoverInterval;
         if (state != RevealState.Hidden)
         {
@@ -438,6 +465,16 @@ internal abstract class WidgetForm : Form
     {
         if (!_mouseDown)
         {
+            var action = _state == RevealState.Open && !IsMenuVisible ? GetAction(args.Location) : null;
+            if (action != _hoveredAction)
+            {
+                _hoveredAction = action;
+                if (action is not null)
+                {
+                    PlaySound(SoundCue.Hover);
+                }
+            }
+
             return;
         }
 
@@ -485,6 +522,11 @@ internal abstract class WidgetForm : Form
         if (_state == RevealState.Open)
         {
             var point = args.Location;
+            if (GetAction(point) is not null)
+            {
+                PlaySound(SoundCue.Click);
+            }
+
             if (HandleBodyClick(point))
             {
                 return;
@@ -528,7 +570,30 @@ internal abstract class WidgetForm : Form
             return;
         }
 
+        PlaySound(SoundCue.Click);
         ToggleOpen();
+    }
+
+    private string? GetAction(Point point)
+    {
+        if (GetBodyAction(point) is { } body)
+        {
+            return body;
+        }
+
+        foreach (var hit in _sizeHitAreas)
+        {
+            if (hit.Value.Contains(point))
+            {
+                return $"size {hit.Key}";
+            }
+        }
+
+        return _dockHitArea.Contains(point) ? "dock"
+            : _pinHitArea.Contains(point) ? "pin"
+            : _hideHitArea.Contains(point) ? "hide"
+            : _exitHitArea.Contains(point) ? "exit"
+            : null;
     }
 
     private void CycleDockEdge()

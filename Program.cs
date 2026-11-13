@@ -2,6 +2,7 @@ using NeonMon.Models;
 using NeonMon.Services;
 using NeonMon.UI;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 
 namespace NeonMon;
@@ -11,7 +12,7 @@ internal static class Program
     private const string InstanceMutexName = @"Local\NeonMon.Instance";
     private const string OpenSignalName = @"Local\NeonMon.Open";
     private const string ExitSignalName = @"Local\NeonMon.Exit";
-    private static readonly string[] ToolArguments = ["--render-settings", "--render-preview", "--render-peek-preview", "--self-test", "--dump-quota", "--export-icon"];
+    private static readonly string[] ToolArguments = ["--render-settings", "--render-preview", "--render-peek-preview", "--self-test", "--dump-quota", "--dump-monitors", "--export-icon"];
 
     [STAThread]
     private static int Main(string[] args)
@@ -46,6 +47,12 @@ internal static class Program
         if (ArgumentValue(args, "--export-icon") is { } iconPath)
         {
             TrayIcon.Export(iconPath);
+            return 0;
+        }
+
+        if (ArgumentValue(args, "--dump-monitors") is { } monitorsPath)
+        {
+            File.WriteAllText(monitorsPath, MonitorIdentity.Dump());
             return 0;
         }
 
@@ -170,6 +177,11 @@ internal static class Program
                 if (!SelfTestDailyQuest())
                 {
                     return 9;
+                }
+
+                if (!SelfTestMonitorIdentity())
+                {
+                    return 10;
                 }
 
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
@@ -416,6 +428,52 @@ internal static class Program
         return history.Backfilled
             && history.Weeks is [{ Used: 45 }, { Used: 90 }]
             && history.WeekUsed == 12;
+    }
+
+    private static bool SelfTestMonitorIdentity()
+    {
+        var edid = new byte[128];
+        byte[] header = [0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x10, 0xAC, 0xB9, 0xA0, 0x4C, 0x30, 0x31, 0x32];
+        header.CopyTo(edid, 0);
+        edid[54] = 0x01;
+        void Descriptor(int offset, byte tag, string text)
+        {
+            edid[offset + 3] = tag;
+            Encoding.Latin1.GetBytes((text + "\n").PadRight(13)).CopyTo(edid, offset + 5);
+        }
+
+        Descriptor(72, 0xFF, "7MT0164L11EL");
+        Descriptor(90, 0xFC, "DELL U2415");
+        var parsed = MonitorIdentity.EdidKey(edid) == "DELA0B9:7MT0164L11EL" && MonitorIdentity.EdidName(edid) == "DELL U2415";
+        edid[75] = 0x10;
+        var numericSerial = MonitorIdentity.EdidKey(edid) == "DELA0B9:842084428";
+        edid[12] = edid[13] = edid[14] = edid[15] = 0;
+        var noSerial = MonitorIdentity.EdidKey(edid) is null && MonitorIdentity.EdidKey(null) is null && MonitorIdentity.EdidKey(new byte[64]) is null;
+
+        (string, MonitorKey)[] console =
+        [
+            ("left", new MonitorKey("DELA07A:1", @"\\?\DISPLAY#DELA07A#4&1&UID1#{x}", "1920x1200@-1920,0")),
+            ("right", new MonitorKey("DELA07A:2", @"\\?\DISPLAY#DELA07A#4&1&UID2#{x}", "1920x1200@3840,0")),
+            ("plain", new MonitorKey(null, @"\\?\DISPLAY#GSM7750#4&1&UID3#{x}", "3840x2160@0,0"))
+        ];
+        (string, MonitorKey)[] remote =
+        [
+            ("primary", new MonitorKey(null, @"\\?\DISPLAY#Default_Monitor#1&1&UID256#{x}", "3840x2160@0,0")),
+            ("side", new MonitorKey(null, @"\\?\DISPLAY#Default_Monitor#1&1&UID257#{x}", "1920x1200@3840,766"))
+        ];
+        var matched = MonitorIdentity.Match(new MonitorKey("DELA07A:2", @"\\?\DISPLAY#DELA07A#4&1&UID1#{x}", "1920x1200@-1920,0"), console) == "right"
+            && MonitorIdentity.Match(new MonitorKey("DELA07A:9", @"\\?\DISPLAY#GSM7750#4&1&UID3#{x}", "1920x1200@-1920,0"), console) == "plain"
+            && MonitorIdentity.Match(new MonitorKey("DELA07A:9", "gone", "1920x1200@-1920,0"), console) == "left"
+            && MonitorIdentity.Match(new MonitorKey(null, null, "800x600@0,0"), console) is null
+            && MonitorIdentity.Match(null, console) is null
+            && MonitorIdentity.Match(new MonitorKey(null, @"\\?\DISPLAY#Default_Monitor#1&1&UID999#{x}", "1920x1200@3840,766"), remote) == "side";
+
+        var saved = JsonSerializer.Deserialize<StripSettings>(JsonSerializer.Serialize(new StripSettings { RemoteMonitor = remote[1].Item2 }));
+        var legacy = JsonSerializer.Deserialize<StripSettings>("""{"Monitor":"\\\\.\\DISPLAY2"}""");
+        var stored = saved is { ConsoleMonitor: null } && saved.RemoteMonitor == remote[1].Item2
+            && legacy is { Monitor: @"\\.\DISPLAY2", ConsoleMonitor: null, RemoteMonitor: null };
+
+        return parsed && numericSerial && noSerial && matched && stored;
     }
 
     private static string? ArgumentValue(string[] args, string name)

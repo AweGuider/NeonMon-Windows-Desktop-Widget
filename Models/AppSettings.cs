@@ -1,5 +1,7 @@
 namespace NeonMon.Models;
 
+internal sealed record MonitorKey(string? Edid, string? DevicePath, string? Layout);
+
 internal class StripSettings
 {
     public bool Enabled { get; set; } = true;
@@ -7,7 +9,10 @@ internal class StripSettings
     public DockEdge DockEdge { get; set; } = DockEdge.Top;
     public double DockOffset { get; set; } = 0.5;
     public bool KeepOpen { get; set; }
+    // Older settings saved a GDI name, which only means something in the session that saved it.
     public string? Monitor { get; set; }
+    public MonitorKey? ConsoleMonitor { get; set; }
+    public MonitorKey? RemoteMonitor { get; set; }
     public bool FollowMouse { get; set; } = true;
     public int HiddenOpacity { get; set; } = 90;
     public int BackgroundOpacity { get; set; } = 100;

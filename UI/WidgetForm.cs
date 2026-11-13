@@ -21,6 +21,7 @@ internal abstract class WidgetForm : Form
     private static readonly Color HiddenBody = Color.FromArgb(6, 15, 20);
 
     private const int HiddenHoverInterval = 200;
+    private const int RevealDwell = 180;
     private const int PeekRadius = 8;
     private const int OpenRadius = 13;
     private const int RevealedHoverInterval = 80;
@@ -36,6 +37,7 @@ internal abstract class WidgetForm : Form
     private readonly System.Windows.Forms.Timer _animationTimer;
     private readonly System.Windows.Forms.Timer _collapseTimer;
     private readonly System.Windows.Forms.Timer _hoverTimer;
+    private readonly System.Windows.Forms.Timer _dwellTimer;
     private readonly ToolTip _toolTip;
     private readonly Dictionary<WidgetSize, Rectangle> _sizeHitAreas = [];
     private Rectangle _dockHitArea;
@@ -117,13 +119,24 @@ internal abstract class WidgetForm : Form
 
         _hoverTimer = new System.Windows.Forms.Timer { Interval = HiddenHoverInterval };
         _hoverTimer.Tick += (_, _) => EvaluatePointerState();
+        _dwellTimer = new System.Windows.Forms.Timer { Interval = RevealDwell };
+        _dwellTimer.Tick += (_, _) =>
+        {
+            _dwellTimer.Stop();
+            if (_state == RevealState.Hidden && Visible && !_mouseDown && !_dragging
+                && GetHoverBounds().Contains(Cursor.Position) && CanRevealNow())
+            {
+                _collapseTimer.Stop();
+                SetRevealState(RevealState.Peek);
+            }
+        };
 
         MouseEnter += (_, _) =>
         {
             _collapseTimer.Stop();
-            if (_state == RevealState.Hidden && CanRevealNow())
+            if (_state == RevealState.Hidden)
             {
-                SetRevealState(RevealState.Peek);
+                _dwellTimer.Start();
             }
         };
         MouseLeave += (_, _) =>
@@ -334,6 +347,7 @@ internal abstract class WidgetForm : Form
 
         var previous = _state;
         _state = state;
+        _dwellTimer.Stop();
         _hoveredAction = null;
         SoundCue? cue = (previous, state) switch
         {
@@ -679,8 +693,23 @@ internal abstract class WidgetForm : Form
     // moment it appeared and reveal it again.
     internal bool HoldsPointer(Point point) => _state != RevealState.Hidden && GetHoverBounds().Contains(point);
 
+    // Hidden reveals only from the tab itself (plus the 1 px gap to the screen edge), so a pointer aimed at browser or
+    // terminal tabs beside it is not covered by a peek. Peek keeps the wider zone, which also stops it flickering.
     private Rectangle GetHoverBounds()
     {
+        if (_state == RevealState.Hidden)
+        {
+            var tab = CalculateBounds(RevealState.Hidden);
+            var area = _dockScreen.WorkingArea;
+            return Settings.DockEdge switch
+            {
+                DockEdge.Top => Rectangle.FromLTRB(tab.Left, area.Top, tab.Right, tab.Bottom),
+                DockEdge.Bottom => Rectangle.FromLTRB(tab.Left, tab.Top, tab.Right, area.Bottom),
+                DockEdge.Left => Rectangle.FromLTRB(area.Left, tab.Top, tab.Right, tab.Bottom),
+                _ => Rectangle.FromLTRB(tab.Left, tab.Top, area.Right, tab.Bottom)
+            };
+        }
+
         var margin = HoverMargin();
         var bounds = CalculateBounds(_state);
         bounds.Inflate(margin, margin);
@@ -701,12 +730,11 @@ internal abstract class WidgetForm : Form
         }
 
         var inside = GetHoverBounds().Contains(cursor);
-        if (_state == RevealState.Hidden && inside)
+        if (_state == RevealState.Hidden)
         {
-            if (CanRevealNow())
+            if (inside && !_dwellTimer.Enabled)
             {
-                _collapseTimer.Stop();
-                SetRevealState(RevealState.Peek);
+                _dwellTimer.Start();
             }
         }
         else if (_state == RevealState.Peek && !inside && !IsMenuVisible && !PeekHeld)
@@ -1421,6 +1449,7 @@ internal abstract class WidgetForm : Form
             _animationTimer.Dispose();
             _collapseTimer.Dispose();
             _hoverTimer.Dispose();
+            _dwellTimer.Dispose();
             _toolTip.Dispose();
             _surface?.Dispose();
             DisposeFonts();

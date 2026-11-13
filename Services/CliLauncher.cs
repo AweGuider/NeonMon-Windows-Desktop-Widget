@@ -2,34 +2,18 @@ using System.Diagnostics;
 
 namespace NeonMon.Services;
 
-// Opens a terminal and starts an interactive CLI. For Claude this renews the CLI sign-in and refreshes the
-// statusline quota data. No prompt is sent; the session is left to the user.
+// Opens a terminal you can watch and runs a command in it: an interactive CLI (for Claude this renews the sign-in and
+// refreshes the statusline quota data; no prompt is sent), or an install or update command the user clicked.
 internal static class CliLauncher
 {
     // Never bare "claude": Windows PowerShell resolves it to npm's claude.ps1, which the default
-    // execution policy blocks. The native installer ships claude.exe; npm ships claude.cmd.
-    public static string? ClaudeCommand()
-    {
-        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
-        foreach (var name in new[] { "claude.exe", "claude.cmd" })
-        {
-            foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-            {
-                try
-                {
-                    if (File.Exists(Path.Combine(dir.Trim().Trim('"'), name)))
-                        return name;
-                }
-                catch (ArgumentException)
-                {
-                }
-            }
-        }
-        return null;
-    }
+    // execution policy blocks. The full path to claude.exe or claude.cmd avoids it.
+    public static string? ClaudeCommand() => CliLocator.FindClaude() is { } claude ? Invoke(claude.Path) : null;
 
-    public static string? CodexCommand() =>
-        CodexAppServerReader.FindCodexExecutable() is { } executable ? $"& '{executable.Replace("'", "''")}'" : null;
+    public static string? CodexCommand() => CodexAppServerReader.FindCodexExecutable() is { } executable ? Invoke(executable) : null;
+
+    public static string Invoke(string executable, string? arguments = null) =>
+        $"& '{executable.Replace("'", "''")}'" + (arguments is null ? "" : $" {arguments}");
 
     public static bool Launch(string command, string? directory)
     {
@@ -37,8 +21,10 @@ internal static class CliLauncher
             ? directory
             : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        return TryStart("wt.exe", $"-d \"{workingDirectory}\" powershell.exe -NoExit -Command \"{command}\"", workingDirectory)
-            || TryStart("powershell.exe", $"-NoExit -Command \"{command}\"", workingDirectory);
+        // Encoded, so quotes, paths and semicolons reach PowerShell intact; Windows Terminal would split on ';'.
+        var encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(command));
+        return TryStart("wt.exe", $"-d \"{workingDirectory}\" powershell.exe -NoExit -EncodedCommand {encoded}", workingDirectory)
+            || TryStart("powershell.exe", $"-NoExit -EncodedCommand {encoded}", workingDirectory);
     }
 
     private static bool TryStart(string fileName, string arguments, string workingDirectory)
@@ -51,6 +37,7 @@ internal static class CliLauncher
                 WorkingDirectory = workingDirectory
             };
             RemoveSessionVariables(startInfo.Environment);
+            startInfo.Environment["PATH"] = CliLocator.SearchPath();
             using var process = Process.Start(startInfo);
             return process is not null;
         }

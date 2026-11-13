@@ -21,6 +21,17 @@ internal sealed record ChoiceRow(string Label, IReadOnlyList<string> Options, Fu
 internal sealed record ActionRow(string Label, Func<string> Value, string Button, Action Click, string? Hint = null,
     Image? ButtonIcon = null, Image? HintIcon = null) : SettingsRow(Label, Hint);
 
+internal enum StepState
+{
+    Pending,
+    Current,
+    Done
+}
+
+// One step of a setup checklist: a status dot, the step, and an optional button.
+internal sealed record StepRow(string Label, StepState State, string? Hint = null, string? Button = null, Action? Click = null)
+    : SettingsRow(Label, Hint);
+
 internal sealed class SettingsForm : Form
 {
     private const int LogicalWidth = 640;
@@ -36,6 +47,7 @@ internal sealed class SettingsForm : Form
     private const int NavSubItemHeight = 26;
     private const int NavSubItemStep = 28;
     private const int NavSubIndent = 14;
+    private const int StepIndent = 20;
 
     private static readonly Color Background = Color.FromArgb(7, 16, 21);
     private static readonly Color Foreground = Color.FromArgb(224, 246, 249);
@@ -77,12 +89,18 @@ internal sealed class SettingsForm : Form
     }
 
     // page is a page title or group prefix, optionally followed by /sub-page title: General, Quota, Quota/Min-max.
-    internal void SavePreview(string path, string page)
+    internal void ShowPage(string page)
     {
         var pages = _pages();
         var parts = page.Split('/', 2);
         Select(pages.FirstOrDefault(candidate => (candidate.Group ?? candidate.Title).StartsWith(parts[0], StringComparison.OrdinalIgnoreCase)
             && (parts.Length == 1 || candidate.Title.Equals(parts[1], StringComparison.OrdinalIgnoreCase))) ?? pages[0]);
+        Invalidate();
+    }
+
+    internal void SavePreview(string path, string page)
+    {
+        ShowPage(page);
         using var bitmap = new Bitmap(ClientSize.Width, ClientSize.Height);
         using (var graphics = Graphics.FromImage(bitmap))
         {
@@ -374,6 +392,12 @@ internal sealed class SettingsForm : Form
             return;
         }
 
+        if (row is StepRow step)
+        {
+            DrawStepDot(graphics, step.State, left, y + Px(RowHeight) / 2f);
+            left += Px(StepIndent);
+        }
+
         var line = new RectangleF(left, y, right - left, Px(RowHeight));
         DrawText(graphics, row.Label, _labelFont, Foreground, line, StringAlignment.Center);
         if (row.Hint is not null)
@@ -400,7 +424,25 @@ internal sealed class SettingsForm : Form
             case ActionRow action:
                 DrawAction(graphics, action, right, centerY);
                 break;
+            case StepRow { Button: { } text, Click: { } click }:
+                DrawButton(graphics, text, null, click, right, centerY);
+                break;
         }
+    }
+
+    private void DrawStepDot(Graphics graphics, StepState state, float left, float centerY)
+    {
+        var size = Px(10);
+        var dot = new RectangleF(left + Px(1), centerY - size / 2f, size, size);
+        if (state == StepState.Done)
+        {
+            using var fill = new SolidBrush(Cyan);
+            graphics.FillEllipse(fill, dot);
+            return;
+        }
+
+        using var pen = new Pen(state == StepState.Current ? Ice : Muted, Px(1.2f));
+        graphics.DrawEllipse(pen, dot);
     }
 
     private void DrawToggle(Graphics graphics, ToggleRow toggle, float right, float centerY)
@@ -451,10 +493,19 @@ internal sealed class SettingsForm : Form
 
     private void DrawAction(Graphics graphics, ActionRow action, float right, float centerY)
     {
+        var button = DrawButton(graphics, action.Button, action.ButtonIcon, action.Click, right, centerY);
+        var height = button.Height;
+        var valueWidth = Px(210);
+        DrawText(graphics, action.Value(), _valueFont, Foreground,
+            new RectangleF(button.X - Px(8) - valueWidth, button.Y, valueWidth, height), StringAlignment.Center, alignRight: true);
+    }
+
+    private RectangleF DrawButton(Graphics graphics, string text, Image? icon, Action click, float right, float centerY)
+    {
         var height = Px(22);
         var iconSize = Px(15);
-        var iconSpace = action.ButtonIcon is null ? 0 : iconSize + Px(5);
-        var buttonWidth = MeasureText(graphics, action.Button, _hintFont) + iconSpace + Px(20);
+        var iconSpace = icon is null ? 0 : iconSize + Px(5);
+        var buttonWidth = MeasureText(graphics, text, _hintFont) + iconSpace + Px(20);
         var button = new RectangleF(right - buttonWidth, centerY - height / 2f, buttonWidth, height);
         using (var path = RoundedRectangle(button, Px(6)))
         using (var border = new Pen(Color.FromArgb(110, 75, 226, 246)))
@@ -462,18 +513,15 @@ internal sealed class SettingsForm : Form
             graphics.DrawPath(border, path);
         }
 
-        if (action.ButtonIcon is not null)
+        if (icon is not null)
         {
-            DrawIcon(graphics, action.ButtonIcon, new RectangleF(button.X + Px(10), centerY - iconSize / 2f, iconSize, iconSize));
+            DrawIcon(graphics, icon, new RectangleF(button.X + Px(10), centerY - iconSize / 2f, iconSize, iconSize));
         }
 
-        DrawText(graphics, action.Button, _hintFont, Ice, new RectangleF(button.X + iconSpace, button.Y, button.Width - iconSpace, height),
+        DrawText(graphics, text, _hintFont, Ice, new RectangleF(button.X + iconSpace, button.Y, button.Width - iconSpace, height),
             StringAlignment.Center, centered: true);
-        _hitAreas.Add((Rectangle.Round(button), action.Click));
-
-        var valueWidth = Px(210);
-        DrawText(graphics, action.Value(), _valueFont, Foreground,
-            new RectangleF(button.X - Px(8) - valueWidth, button.Y, valueWidth, height), StringAlignment.Center, alignRight: true);
+        _hitAreas.Add((Rectangle.Round(button), click));
+        return button;
     }
 
     private static void DrawIcon(Graphics graphics, Image icon, RectangleF bounds)

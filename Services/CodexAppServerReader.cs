@@ -162,30 +162,7 @@ internal sealed class CodexAppServerReader
     {
         try
         {
-            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var desktopBin = Path.Combine(local, "OpenAI", "Codex", "bin");
-            var candidates = new List<string>
-            {
-                Path.Combine(desktopBin, "codex.exe"),
-                Path.Combine(roaming, "npm", "node_modules", "@openai", "codex", "node_modules", "@openai", "codex-win32-x64",
-                    "vendor", "x86_64-pc-windows-msvc", "bin", "codex.exe")
-            };
-
-            if (Directory.Exists(desktopBin))
-            {
-                candidates.AddRange(Directory.EnumerateDirectories(desktopBin).Select(directory => Path.Combine(directory, "codex.exe")));
-            }
-
-            candidates.AddRange((Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
-                .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Where(directory => directory.IndexOfAny(Path.GetInvalidPathChars()) < 0)
-                .Select(directory => Path.Combine(directory, "codex.exe")));
-
-            return candidates
-                .Where(File.Exists)
-                .OrderByDescending(File.GetLastWriteTimeUtc)
-                .FirstOrDefault();
+            return CliLocator.FindCodex()?.Path;
         }
         catch
         {

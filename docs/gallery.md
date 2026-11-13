@@ -1,6 +1,6 @@
 # Gallery
 
-All screenshots are rendered by NeonMon itself (`NeonMon.exe --render-preview <file> <size> --strip <system|quota> --state <Hidden|Peek|Open> --sample`, and `--render-settings <file> <General|System|Quota|Audio|Support>[/<sub-page>] --sample` for the Settings window, e.g. `Quota/Min-max`) at 125% scaling with fixed sample data, so they are reproducible and contain no live system data.
+All screenshots are rendered by NeonMon itself (`NeonMon.exe --render-preview <file> <size> --strip <system|quota> --state <Hidden|Peek|Open> --sample`, with `--setup <none|claude|statusline>` for the Quota pulse set-up states, and `--render-settings <file> <General|System|Quota|Audio|Support>[/<sub-page>] --sample` for the Settings window, e.g. `Quota/Min-max`) at 125% scaling with fixed sample data, so they are reproducible and contain no live system data.
 
 [Back to the README](../README.md)
 
@@ -65,3 +65,7 @@ The hidden state is a small tab hanging off the screen edge: a dark body with br
 The General page holds the options that apply to both pulses, including the hold-to-peek hotkey and the daily update check.
 
 ![Settings window, General page](images/settings-general.png)
+
+The Setup page walks through installing, signing in to, and updating the Claude Code and Codex CLIs, and connecting Claude's status line. Each step opens a terminal you can watch or asks before it changes anything.
+
+![Settings window, Quota pulse Setup page](images/settings-setup.png)

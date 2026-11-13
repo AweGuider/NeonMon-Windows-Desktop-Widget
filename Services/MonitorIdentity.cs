@@ -54,7 +54,7 @@ internal static class MonitorIdentity
             return twins[0].Item;
         }
 
-        return (twins.Count > 1 ? ByPlace(twins, key, layoutFirst) : null) ?? ByPlace(list, key, layoutFirst);
+        return twins.Count > 1 ? ByPlace(twins, key, layoutFirst) ?? twins[0].Item : ByPlace(list, key, layoutFirst);
     }
 
     private static T? ByPlace<T>(List<(T Item, MonitorKey Key)> candidates, MonitorKey key, bool layoutFirst) where T : class

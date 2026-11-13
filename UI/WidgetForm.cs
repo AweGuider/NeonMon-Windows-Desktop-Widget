@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using NeonMon.Models;
+using NeonMon.Services;
 
 namespace NeonMon.UI;
 
@@ -54,6 +55,7 @@ internal abstract class WidgetForm : Form
     private Point _mouseDownScreen;
     private double _dragStartOffset;
     private Screen _dockScreen;
+    private bool _monitorMigrated;
     private bool _exiting;
     private nint _menuPreviousForeground;
     private bool _renderQueued;
@@ -67,7 +69,7 @@ internal abstract class WidgetForm : Form
     {
         Settings = settings;
         _saveSettings = saveSettings;
-        _dockScreen = FindScreen(settings.Monitor);
+        _dockScreen = FindScreen(null);
         CreateFonts();
 
         AutoScaleMode = AutoScaleMode.Dpi;
@@ -131,6 +133,7 @@ internal abstract class WidgetForm : Form
         MouseUp += HandleMouseUp;
         Load += (_, _) =>
         {
+            SaveMigratedMonitor();
             Bounds = CalculateBounds(RevealState.Hidden);
             ApplyWindowRegion();
             Invalidate();
@@ -258,7 +261,7 @@ internal abstract class WidgetForm : Form
     internal void SetMonitor(Screen screen)
     {
         Settings.FollowMouse = false;
-        Settings.Monitor = screen.DeviceName;
+        StoreMonitor(screen, MonitorIdentity.IsRemoteSession);
         MoveToScreen(screen);
         SaveSettings();
     }
@@ -268,7 +271,7 @@ internal abstract class WidgetForm : Form
         Settings.FollowMouse = followMouse;
         if (!followMouse)
         {
-            Settings.Monitor = _dockScreen.DeviceName;
+            StoreMonitor(_dockScreen, MonitorIdentity.IsRemoteSession);
         }
 
         SaveSettings();
@@ -297,10 +300,71 @@ internal abstract class WidgetForm : Form
         Invalidate();
     }
 
-    private static Screen FindScreen(string? deviceName) =>
+    // A legacy GDI name stays saved until both session kinds have their own key: it may belong to the other session
+    // kind, and both sessions can hand out the same \\.\DISPLAYn names.
+    private Screen FindScreen(string? unsavedDeviceName)
+    {
+        var remote = MonitorIdentity.IsRemoteSession;
+        var key = remote ? Settings.RemoteMonitor : Settings.ConsoleMonitor;
+        if (key is not null)
+        {
+            return MonitorIdentity.Find(key, remote) ?? ScreenNamed(null);
+        }
+
+        var screen = ScreenNamed(Settings.Monitor ?? unsavedDeviceName);
+        if (MigrateLegacyMonitor(Settings, screen.DeviceName, remote, () => MonitorIdentity.Identify(screen)))
+        {
+            _monitorMigrated = true;
+        }
+
+        return screen;
+    }
+
+    internal static bool MigrateLegacyMonitor(StripSettings settings, string deviceName, bool remote, Func<MonitorKey> identify)
+    {
+        if (settings.Monitor is not { } legacy || deviceName != legacy)
+        {
+            return false;
+        }
+
+        StoreMonitor(settings, identify(), remote);
+        if (settings.ConsoleMonitor is not null && settings.RemoteMonitor is not null)
+        {
+            settings.Monitor = null;
+        }
+
+        return true;
+    }
+
+    private static Screen ScreenNamed(string? deviceName) =>
         Screen.AllScreens.FirstOrDefault(screen => screen.DeviceName == deviceName)
         ?? Screen.PrimaryScreen
         ?? Screen.AllScreens[0];
+
+    private void StoreMonitor(Screen screen, bool remote) => StoreMonitor(Settings, MonitorIdentity.Identify(screen), remote);
+
+    private static void StoreMonitor(StripSettings settings, MonitorKey key, bool remote)
+    {
+        if (remote)
+        {
+            settings.RemoteMonitor = key;
+        }
+        else
+        {
+            settings.ConsoleMonitor = key;
+        }
+    }
+
+    // The constructor only migrates in memory: tool runs such as --render-preview build strips they never show
+    // and must not rewrite the settings file.
+    private void SaveMigratedMonitor()
+    {
+        if (_monitorMigrated)
+        {
+            _monitorMigrated = false;
+            SaveSettings();
+        }
+    }
 
     internal void SetKeepOpen(bool keepOpen)
     {
@@ -360,7 +424,8 @@ internal abstract class WidgetForm : Form
 
     internal void ReattachToScreen()
     {
-        _dockScreen = FindScreen(Settings.FollowMouse ? _dockScreen.DeviceName : Settings.Monitor ?? _dockScreen.DeviceName);
+        _dockScreen = Settings.FollowMouse ? ScreenNamed(_dockScreen.DeviceName) : FindScreen(_dockScreen.DeviceName);
+        SaveMigratedMonitor();
         if (!IsHandleCreated || _animationTimer.Enabled)
         {
             return;

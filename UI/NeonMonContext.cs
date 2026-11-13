@@ -352,11 +352,13 @@ internal sealed class NeonMonContext : ApplicationContext
         stripItems.Add(dockMenu);
 
         var monitorMenu = new ToolStripMenuItem("Monitor");
-        var screens = Screen.AllScreens;
+        var screens = MonitorIdentity.Ordered();
+        var remote = MonitorIdentity.IsRemoteSession;
         for (var i = 0; i < screens.Length; i++)
         {
             var screen = screens[i];
-            var item = new ToolStripMenuItem($"{i + 1} · {screen.Bounds.Width}×{screen.Bounds.Height}{(screen.Primary ? " (primary)" : "")}")
+            var name = MonitorIdentity.FriendlyName(screen) ?? (remote ? "Remote" : "Monitor");
+            var item = new ToolStripMenuItem($"{i + 1} · {name} · {screen.Bounds.Width}×{screen.Bounds.Height}{(screen.Primary ? " (primary)" : "")}")
             {
                 Checked = !target.Settings.FollowMouse && target.DockScreen.DeviceName == screen.DeviceName
             };
@@ -666,7 +668,7 @@ internal sealed class NeonMonContext : ApplicationContext
             return rows;
         }
 
-        var screens = Screen.AllScreens;
+        var screens = MonitorIdentity.Ordered();
         rows.AddRange(
         [
             new ChoiceRow("Size", ["S", "M", "L"], () => (int)form.Settings.Size, index => form.SetWidgetSize((WidgetSize)index)),

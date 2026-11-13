@@ -21,6 +21,12 @@ internal sealed record ChoiceRow(string Label, IReadOnlyList<string> Options, Fu
 internal sealed record ActionRow(string Label, Func<string> Value, string Button, Action Click, string? Hint = null,
     Image? ButtonIcon = null, Image? HintIcon = null) : SettingsRow(Label, Hint);
 
+internal sealed record MonitorTile(Rectangle Bounds, string Name, bool Primary, Screen? Screen = null);
+
+// Draws the monitors at their real relative size and position; Current is the index the strip docks to.
+internal sealed record MonitorMapRow(string Label, IReadOnlyList<MonitorTile> Monitors, Func<bool> FollowMouse, Func<int> Current,
+    Func<DockEdge> DockEdge, Func<double> DockOffset, Action<bool> SetFollowMouse, Action<int> SetMonitor) : SettingsRow(Label);
+
 internal sealed class SettingsForm : Form
 {
     private const int LogicalWidth = 640;
@@ -30,6 +36,7 @@ internal sealed class SettingsForm : Form
     private const int SectionHeight = 28;
     private const int RowHeight = 32;
     private const int HintHeight = 15;
+    private const int MapHeight = 88;
     private const int SectionGap = 14;
     private const int NavItemHeight = 30;
     private const int NavItemStep = 34;
@@ -47,6 +54,9 @@ internal sealed class SettingsForm : Form
 
     private readonly Func<IReadOnlyList<SettingsPage>> _pages;
     private readonly List<(Rectangle Area, Action Click)> _hitAreas = [];
+    private readonly List<(Rectangle Area, Rectangle Monitor, int Number)> _identifyAreas = [];
+    private IdentifyOverlay? _identify;
+    private Rectangle _identifiedArea;
     private (string? Group, string? Title) _selected;
     private float _scroll;
     private RectangleF _track;
@@ -186,6 +196,7 @@ internal sealed class SettingsForm : Form
     private static int RowLogicalHeight(SettingsRow row, bool first) => row switch
     {
         SectionRow => (first ? 0 : SectionGap) + SectionHeight + (row.Hint is null ? 0 : HintHeight),
+        MonitorMapRow => RowHeight + MapHeight + HintHeight + 6,
         _ => RowHeight + (row.Hint is null ? 0 : HintHeight)
     };
 
@@ -210,6 +221,7 @@ internal sealed class SettingsForm : Form
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
         graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
         _hitAreas.Clear();
+        _identifyAreas.Clear();
 
         var pages = _pages();
         var selectedIndex = SelectedIndex(pages);
@@ -400,7 +412,117 @@ internal sealed class SettingsForm : Form
             case ActionRow action:
                 DrawAction(graphics, action, right, centerY);
                 break;
+            case MonitorMapRow map:
+                DrawMonitorMap(graphics, map, left, right, y, centerY);
+                break;
         }
+    }
+
+    private void DrawMonitorMap(Graphics graphics, MonitorMapRow map, float left, float right, float y, float centerY)
+    {
+        var follow = map.FollowMouse();
+        DrawChoice(graphics, new ChoiceRow(map.Label, ["Follow mouse", "Pick below"], () => follow ? 0 : 1,
+            index => map.SetFollowMouse(index == 0)), right, centerY);
+
+        var area = new RectangleF(left, y + Px(RowHeight), right - left, Px(MapHeight));
+        using (var path = RoundedRectangle(area, Px(8)))
+        using (var border = new Pen(Line))
+        {
+            graphics.DrawPath(border, path);
+        }
+
+        var monitors = map.Monitors;
+        if (monitors.Count == 0)
+        {
+            return;
+        }
+
+        var minX = monitors.Min(monitor => monitor.Bounds.Left);
+        var minY = monitors.Min(monitor => monitor.Bounds.Top);
+        var spanX = monitors.Max(monitor => monitor.Bounds.Right) - minX;
+        var spanY = monitors.Max(monitor => monitor.Bounds.Bottom) - minY;
+        var inner = RectangleF.Inflate(area, -Px(12), -Px(10));
+        var scale = Math.Min(inner.Width / spanX, inner.Height / spanY);
+        var originX = inner.X + (inner.Width - spanX * scale) / 2;
+        var originY = inner.Y + (inner.Height - spanY * scale) / 2;
+        var current = map.Current();
+        for (var i = 0; i < monitors.Count; i++)
+        {
+            var index = i;
+            var bounds = monitors[i].Bounds;
+            var tile = RectangleF.Inflate(new RectangleF(originX + (bounds.X - minX) * scale, originY + (bounds.Y - minY) * scale,
+                bounds.Width * scale, bounds.Height * scale), -Px(2), -Px(2));
+            var selected = !follow && i == current;
+            using (var path = RoundedRectangle(tile, Px(3)))
+            {
+                if (selected)
+                {
+                    using var fill = new SolidBrush(Color.FromArgb(36, Cyan));
+                    graphics.FillPath(fill, path);
+                }
+
+                using var border = new Pen(selected ? Cyan : follow ? Line : ControlBorder);
+                graphics.DrawPath(border, path);
+            }
+
+            if (selected)
+            {
+                DrawDockMarker(graphics, tile, map.DockEdge(), map.DockOffset());
+            }
+
+            DrawText(graphics, $"{i + 1}", _labelFont, selected ? Foreground : Muted, tile, StringAlignment.Center, centered: true);
+            if (!follow)
+            {
+                _hitAreas.Add((Rectangle.Round(tile), () => map.SetMonitor(index)));
+                _identifyAreas.Add((Rectangle.Round(tile), bounds, i + 1));
+            }
+        }
+
+        var hint = follow || current < 0
+            ? "Moves to the monitor under the mouse."
+            : $"{current + 1} · {monitors[current].Name} · {monitors[current].Bounds.Width}×{monitors[current].Bounds.Height}"
+                + (monitors[current].Primary ? " · primary" : "");
+        DrawText(graphics, hint, _hintFont, Muted, new RectangleF(left, area.Bottom + Px(4), right - left, Px(HintHeight)), StringAlignment.Near);
+    }
+
+    // A short bar on the edge the strip docks to, placed along that edge by the strip's offset.
+    private void DrawDockMarker(Graphics graphics, RectangleF tile, DockEdge edge, double offset)
+    {
+        float thickness = Px(3);
+        float inset = Px(3);
+        var horizontal = edge is DockEdge.Top or DockEdge.Bottom;
+        var edgeLength = horizontal ? tile.Width : tile.Height;
+        var length = edgeLength * 0.3f;
+        var along = inset + (edgeLength - 2 * inset - length) * (float)Math.Clamp(offset, 0, 1);
+        var bar = edge switch
+        {
+            DockEdge.Top => new RectangleF(tile.X + along, tile.Y + inset, length, thickness),
+            DockEdge.Bottom => new RectangleF(tile.X + along, tile.Bottom - inset - thickness, length, thickness),
+            DockEdge.Left => new RectangleF(tile.X + inset, tile.Y + along, thickness, length),
+            _ => new RectangleF(tile.Right - inset - thickness, tile.Y + along, thickness, length)
+        };
+        using var path = RoundedRectangle(bar, thickness / 2);
+        using var brush = new SolidBrush(Cyan);
+        graphics.FillPath(brush, path);
+    }
+
+    private void UpdateIdentify(Point location)
+    {
+        var target = _identifyAreas.FirstOrDefault(candidate => candidate.Area.Contains(location));
+        if (target.Area == _identifiedArea)
+        {
+            return;
+        }
+
+        _identifiedArea = target.Area;
+        if (target.Area.IsEmpty)
+        {
+            _identify?.Hide();
+            return;
+        }
+
+        _identify ??= new IdentifyOverlay();
+        _identify.ShowOn(target.Monitor, target.Number);
     }
 
     private void DrawToggle(Graphics graphics, ToggleRow toggle, float right, float centerY)
@@ -525,6 +647,7 @@ internal sealed class SettingsForm : Form
             return;
         }
 
+        UpdateIdentify(args.Location);
         var hovered = _hitAreas.FirstOrDefault(hit => hit.Area.Contains(args.Location)).Area;
         Cursor = hovered.IsEmpty ? Cursors.Default : Cursors.Hand;
         if (hovered != _hoveredArea)
@@ -541,6 +664,13 @@ internal sealed class SettingsForm : Form
     {
         base.OnMouseLeave(args);
         _hoveredArea = Rectangle.Empty;
+        UpdateIdentify(new Point(-1, -1));
+    }
+
+    protected override void OnDeactivate(EventArgs args)
+    {
+        base.OnDeactivate(args);
+        UpdateIdentify(new Point(-1, -1));
     }
 
     protected override void OnMouseClick(MouseEventArgs args)
@@ -572,6 +702,7 @@ internal sealed class SettingsForm : Form
             _sectionFont?.Dispose();
             _valueFont?.Dispose();
             _navSubFont?.Dispose();
+            _identify?.Dispose();
         }
 
         base.Dispose(disposing);

@@ -31,6 +31,14 @@ internal sealed class NeonMonContext : ApplicationContext
     private SettingsForm? _settingsForm;
     private string? _sampleStatusLine;
     private List<string> _settingsDrives = [];
+    private List<MonitorTile> _settingsMonitors = [];
+
+    private static readonly MonitorTile[] SampleMonitors =
+    [
+        new(new Rectangle(-1200, -300, 1200, 1920), "Portrait monitor", false),
+        new(new Rectangle(0, 0, 3840, 2160), "4K monitor", true),
+        new(new Rectangle(3840, 480, 2560, 1440), "QHD monitor", false)
+    ];
     private bool _startWithWindows;
     private bool _startupOtherCopy;
     private readonly bool _quotaSettingsCreated;
@@ -326,6 +334,12 @@ internal sealed class NeonMonContext : ApplicationContext
             form.ReattachToScreen();
         }
 
+        if (_settingsForm is { IsDisposed: false })
+        {
+            _settingsMonitors = MonitorTiles();
+            _settingsForm.Invalidate();
+        }
+
         ResolveSpacing(QuotaForm);
         QuotaForm.AnimateToLayout();
     }
@@ -396,11 +410,12 @@ internal sealed class NeonMonContext : ApplicationContext
         stripItems.Add(dockMenu);
 
         var monitorMenu = new ToolStripMenuItem("Monitor");
-        var screens = Screen.AllScreens;
+        var screens = MonitorIdentity.Ordered();
+        var remote = MonitorIdentity.IsRemoteSession;
         for (var i = 0; i < screens.Length; i++)
         {
             var screen = screens[i];
-            var item = new ToolStripMenuItem($"{i + 1} · {screen.Bounds.Width}×{screen.Bounds.Height}{(screen.Primary ? " (primary)" : "")}")
+            var item = new ToolStripMenuItem($"{i + 1} · {MonitorName(screen, remote)} · {screen.Bounds.Width}×{screen.Bounds.Height}{(screen.Primary ? " (primary)" : "")}")
             {
                 Checked = !target.Settings.FollowMouse && target.DockScreen.DeviceName == screen.DeviceName
             };
@@ -523,6 +538,7 @@ internal sealed class NeonMonContext : ApplicationContext
         }
 
         _settingsDrives = TelemetryService.DriveNames();
+        _settingsMonitors = MonitorTiles();
         RefreshStartupState();
         _settingsForm = new SettingsForm(BuildSettingsPages, _trayIcon);
         _settingsForm.Deactivate += (_, _) => StopHotkeyRecording();
@@ -540,6 +556,7 @@ internal sealed class NeonMonContext : ApplicationContext
         _settingsDrives = sampleStatusLine is null
             ? TelemetryService.DriveNames()
             : TelemetrySnapshot.Sample.Drives.Select(drive => drive.Name).ToList();
+        _settingsMonitors = sampleStatusLine is null ? MonitorTiles() : [.. SampleMonitors];
         if (sampleStatusLine is null)
         {
             RefreshStartupState();
@@ -794,6 +811,14 @@ internal sealed class NeonMonContext : ApplicationContext
         }
     }
 
+    private static List<MonitorTile> MonitorTiles()
+    {
+        var remote = MonitorIdentity.IsRemoteSession;
+        return [.. MonitorIdentity.Ordered().Select(screen => new MonitorTile(screen.Bounds, MonitorName(screen, remote), screen.Primary, screen))];
+    }
+
+    private static string MonitorName(Screen screen, bool remote) => MonitorIdentity.FriendlyName(screen) ?? (remote ? "Remote" : "Monitor");
+
     private List<SettingsRow> StripRows(WidgetForm form)
     {
         var rows = new List<SettingsRow>
@@ -805,24 +830,23 @@ internal sealed class NeonMonContext : ApplicationContext
             return rows;
         }
 
-        var screens = Screen.AllScreens;
+        var monitors = _settingsMonitors;
         rows.AddRange(
         [
             new SectionRow("Placement"),
             new ChoiceRow("Size", ["S", "M", "L"], () => (int)form.Settings.Size, index => form.SetWidgetSize((WidgetSize)index)),
             new ChoiceRow("Dock edge", ["Top", "Bottom", "Left", "Right"], () => (int)form.Settings.DockEdge,
                 index => form.SetDockEdge((DockEdge)index)),
-            new ChoiceRow("Monitor", ["Follow mouse", .. screens.Select((_, i) => $"{i + 1}")],
-                () => form.Settings.FollowMouse ? 0 : Array.FindIndex(screens, screen => screen.DeviceName == form.DockScreen.DeviceName) + 1,
+            new MonitorMapRow("Monitor", monitors, () => form.Settings.FollowMouse,
+                () => monitors.FindIndex(tile => tile.Screen?.DeviceName == form.DockScreen.DeviceName) is var index and >= 0
+                    ? index
+                    : monitors.FindIndex(tile => tile.Primary),
+                () => form.Settings.DockEdge, () => form.Settings.DockOffset, form.SetFollowMouse,
                 index =>
                 {
-                    if (index == 0)
+                    if (monitors[index].Screen is { } screen)
                     {
-                        form.SetFollowMouse(true);
-                    }
-                    else
-                    {
-                        form.SetMonitor(screens[index - 1]);
+                        form.SetMonitor(screen);
                     }
                 }),
             new ToggleRow("Keep open", () => form.Settings.KeepOpen, form.SetKeepOpen),

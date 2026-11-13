@@ -471,8 +471,11 @@ internal sealed class SettingsForm : Form
             }
 
             DrawText(graphics, $"{i + 1}", _labelFont, selected ? Foreground : Muted, tile, StringAlignment.Center, centered: true);
-            _hitAreas.Add((Rectangle.Round(tile), () => map.SetMonitor(index)));
-            _identifyAreas.Add((Rectangle.Round(tile), bounds, i + 1));
+            if (!follow)
+            {
+                _hitAreas.Add((Rectangle.Round(tile), () => map.SetMonitor(index)));
+                _identifyAreas.Add((Rectangle.Round(tile), bounds, i + 1));
+            }
         }
 
         var hint = follow || current < 0

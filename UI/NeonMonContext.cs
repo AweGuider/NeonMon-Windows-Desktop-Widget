@@ -13,6 +13,7 @@ internal sealed class NeonMonContext : ApplicationContext
     private readonly QuotaService _quota;
     private readonly MetricsBridge _bridge;
     private readonly UpdateChecker _updates;
+    private readonly CliVersions _versions = new(Application.ProductVersion);
     private readonly InteractionSounds _sounds;
     private bool _quietReveals;
     private bool _soundsHeld;
@@ -30,6 +31,8 @@ internal sealed class NeonMonContext : ApplicationContext
     private string? _hotkeyRecordingHint;
     private SettingsForm? _settingsForm;
     private string? _sampleStatusLine;
+    private CliSetupStatus _setup = CliSetupStatus.Unknown;
+    private bool _showInstallCommands;
     private List<string> _settingsDrives = [];
     private List<MonitorTile> _settingsMonitors = [];
 
@@ -52,6 +55,7 @@ internal sealed class NeonMonContext : ApplicationContext
         UpdateChecker updates)
     {
         _updates = updates;
+        _versions.Changed += OnVersionsChanged;
         _settings = settings;
         _settingsStore = settingsStore;
         _telemetry = telemetry;
@@ -77,7 +81,8 @@ internal sealed class NeonMonContext : ApplicationContext
 
         _quota.SnapshotUpdated += QuotaForm.PostSnapshot;
         QuotaForm.CliRequested += OpenCli;
-        RefreshCliAvailability();
+        QuotaForm.SetupRequested += ShowSetup;
+        RefreshCliAvailability(readClaudeSettings: false);
 
         _systemMenu = CreateMenu(SystemForm);
         _quotaMenu = CreateMenu(QuotaForm);
@@ -540,7 +545,13 @@ internal sealed class NeonMonContext : ApplicationContext
         _settingsDrives = TelemetryService.DriveNames();
         _settingsMonitors = MonitorTiles();
         RefreshStartupState();
+        RefreshCliAvailability();
         _settingsForm = new SettingsForm(BuildSettingsPages, _trayIcon);
+        _settingsForm.Activated += (_, _) =>
+        {
+            RefreshCliAvailability();
+            RefreshVersions();
+        };
         _settingsForm.Deactivate += (_, _) => StopHotkeyRecording();
         _settingsForm.FormClosed += (_, _) => StopHotkeyRecording();
         _settingsForm.SoundRequested += PlaySound;
@@ -548,11 +559,17 @@ internal sealed class NeonMonContext : ApplicationContext
         _settingsForm.FormClosed += (_, _) => UpdateSoundHold();
         _settingsForm.Show();
         _settingsForm.Activate();
+        RefreshVersions();
     }
 
     internal void SaveSettingsPreview(string path, string page, string? sampleStatusLine)
     {
         _sampleStatusLine = sampleStatusLine;
+        if (sampleStatusLine is not null)
+        {
+            _setup = CliSetupStatus.Sample;
+            _versions.SetPreview(QuotaProvider.Claude, _setup.Claude!, "2.1.310", "2.1.323");
+        }
         _settingsDrives = sampleStatusLine is null
             ? TelemetryService.DriveNames()
             : TelemetrySnapshot.Sample.Drives.Select(drive => drive.Name).ToList();
@@ -595,10 +612,10 @@ internal sealed class NeonMonContext : ApplicationContext
         return
         [
             new SettingsPage("General", general),
-            .. PulsePages(SystemForm,
+            .. PulsePages(SystemForm, [],
                 new SettingsPage("Hidden tab", HiddenTabRows()),
                 new SettingsPage("Peek", PeekRows())),
-            .. PulsePages(QuotaForm,
+            .. PulsePages(QuotaForm, [new SettingsPage("Setup", SetupRows())],
                 new SettingsPage("Display", QuotaDisplayRows()),
                 new SettingsPage("Min-max", MinMaxRows()),
                 new SettingsPage("Claude", ClaudeRows()),
@@ -654,10 +671,17 @@ internal sealed class NeonMonContext : ApplicationContext
     }
 
     // A turned-off pulse keeps only its Strip page, which holds the switch to turn it back on.
-    private IEnumerable<SettingsPage> PulsePages(WidgetForm form, params SettingsPage[] pages)
+    // leading pages come before Strip, so Quota pulse opens on Setup.
+    private IEnumerable<SettingsPage> PulsePages(WidgetForm form, SettingsPage[] leading, params SettingsPage[] pages)
     {
         var group = Pulses.First(pulse => pulse.Form == form).Name;
-        return [new SettingsPage("Strip", StripRows(form), group), .. form.Settings.Enabled ? pages.Select(page => page with { Group = group }) : []];
+        if (!form.Settings.Enabled)
+        {
+            return [new SettingsPage("Strip", StripRows(form), group)];
+        }
+
+        return [.. leading.Select(page => page with { Group = group }), new SettingsPage("Strip", StripRows(form), group),
+            .. pages.Select(page => page with { Group = group })];
     }
 
     private List<SettingsRow> QuotaDisplayRows() =>
@@ -1241,8 +1265,215 @@ internal sealed class NeonMonContext : ApplicationContext
     private static string? CliCommand(QuotaProvider provider) =>
         provider == QuotaProvider.Claude ? CliLauncher.ClaudeCommand() : CliLauncher.CodexCommand();
 
-    private void RefreshCliAvailability() =>
-        QuotaForm.SetCliAvailability(CliCommand(QuotaProvider.Claude) is not null, CliCommand(QuotaProvider.Codex) is not null);
+    // File-exists and registry reads only. Claude's settings.json is read when the Quota pulse reveals or Settings
+    // opens or regains focus, not at startup.
+    private void RefreshCliAvailability() => RefreshCliAvailability(readClaudeSettings: true);
+
+    private void RefreshCliAvailability(bool readClaudeSettings)
+    {
+        if (_sampleStatusLine is null)
+        {
+            var statusLine = readClaudeSettings ? ClaudeStatusLineConfig.Read(StatusLineCommand()) : _setup.StatusLine;
+            _setup = CliSetupStatus.Detect(_quota.Latest, statusLine);
+        }
+
+        // Until settings.json has been read, the status line counts as connected so no hint flashes up.
+        QuotaForm.SetCliAvailability(_setup.Claude is not null, _setup.Codex is not null,
+            _setup.StatusLine.State is ClaudeStatusLineState.NeonMon or ClaudeStatusLineState.Unknown);
+        _settingsForm?.Invalidate();
+    }
+
+    private static string? StatusLineCommand() =>
+        ClaudeStatusLineConfig.ScriptPath() is { } script ? ClaudeStatusLineConfig.Command(script) : null;
+
+    private void ShowSetup()
+    {
+        ShowSettings();
+        _settingsForm?.ShowPage("Quota/Setup");
+    }
+
+    private const string NoWinget = "winget isn't available on this PC. Use Other ways to install below.";
+
+    private List<SettingsRow> SetupRows()
+    {
+        var rows = new List<SettingsRow>
+        {
+            new SectionRow("Setup", "NeonMon opens a terminal you can watch. Nothing installs in the background."),
+            new SectionRow("Claude Code"),
+            new StepRow("Plan", StepState.Pending, "Pro, Max, Team, Enterprise or Console. The free plan can't use Claude Code."),
+            InstallStep(QuotaProvider.Claude, _setup.Claude)
+        };
+
+        var statusLineDone = _setup.StatusLine.State == ClaudeStatusLineState.NeonMon;
+        var nodeDone = _setup.Node is not null;
+        var installNode = CliSetup.InstallCommand(_setup, CliSetup.NodeWingetId);
+        rows.Add(nodeDone || statusLineDone
+            ? new StepRow("Node.js", StepState.Done, "Runs NeonMon's status line script.")
+            : installNode is null
+                ? new StepRow("Node.js", StepState.Current, "Runs NeonMon's status line script. winget isn't available; install Node.js LTS yourself.")
+                : new StepRow("Node.js", StepState.Current, "Runs NeonMon's status line script. Opens a terminal with winget.", "Install Node.js",
+                    () => RunSetupCommand(CliSetup.FinishedScript(installNode, "Node.js installed. Next in Setup: connect the status line.", null))));
+        rows.Add(statusLineDone
+            ? new StepRow("Connect status line", StepState.Done, $"Connected · {StatusLineStatus()}")
+            : new StepRow("Connect status line", nodeDone ? StepState.Current : StepState.Pending,
+                "Adds NeonMon's status line to Claude Code's settings, after you confirm.", "Connect", ConnectStatusLine));
+        rows.Add(SignInStep(QuotaProvider.Claude, _setup.Claude, _setup.ClaudeSignedIn && statusLineDone,
+            "Run claude and sign in with your browser. Done once Claude limits arrive."));
+
+        rows.Add(new SectionRow("Codex"));
+        rows.Add(new StepRow("Plan", StepState.Pending, "ChatGPT Plus, Pro, Business, Edu or Enterprise."));
+        rows.Add(InstallStep(QuotaProvider.Codex, _setup.Codex));
+        rows.Add(SignInStep(QuotaProvider.Codex, _setup.Codex, _setup.CodexSignedIn,
+            "Run codex and choose Sign in with ChatGPT. Done once Codex limits arrive."));
+
+        var showCommands = _showInstallCommands || _setup.Winget is null;
+        rows.Add(new SectionRow("Other ways to install"));
+        rows.Add(new ActionRow("Official installers and npm", () => "", showCommands ? "Hide" : "Show",
+            () => _showInstallCommands = !showCommands,
+            _setup.Npm is null ? "Commands to copy and run yourself. npm comes with Node.js." : "Commands to copy and run yourself."));
+        if (showCommands)
+        {
+            rows.AddRange(CliSetup.OtherInstallCommands.Where(item => !item.NeedsNpm || _setup.Npm is not null).Select(item =>
+                new ActionRow(item.Label, () => "", "Copy", () => CopyCommand(item.Command), item.Command)));
+        }
+
+        return rows;
+    }
+
+    private StepRow InstallStep(QuotaProvider provider, CliInstall? install)
+    {
+        var name = provider == QuotaProvider.Claude ? "Claude" : "Codex";
+        if (install is null)
+        {
+            var wingetId = CliSetup.WingetId(provider);
+            return CliSetup.InstallCommand(_setup, wingetId) is { } command
+                ? new StepRow("Install CLI", StepState.Current, $"Opens a terminal with winget install {wingetId}.", "Install",
+                    () => RunSetupCommand(CliSetup.FinishedScript(command, $"{name} CLI installed. Next in Setup: sign in.", null)))
+                : new StepRow("Install CLI", StepState.Current, NoWinget);
+        }
+
+        var update = CliSetup.UpdateCommand(provider, install, _setup);
+        var installed = _versions.Installed(provider, install);
+        if (update is null)
+        {
+            var text = CliSetup.SourceText(provider, install, canUpdate: false);
+            return new StepRow("Install CLI", StepState.Done, installed is null ? text : $"{installed} · {char.ToLowerInvariant(text[0])}{text[1..]}");
+        }
+
+        var latest = _versions.Latest(provider, install);
+        var source = CliSetup.SourceShort(provider, install);
+        if (installed is not null && latest is not null && !CliVersions.IsNewer(latest, installed))
+        {
+            return new StepRow("Install CLI", StepState.Done, $"{installed}, up to date · installed with {source}");
+        }
+
+        var hint = installed is not null && latest is not null
+            ? $"Update available: {installed} → {latest} · installed with {source}"
+            : installed is null
+                ? CliSetup.SourceText(provider, install, canUpdate: true)
+                : _versions.Checking(provider, install)
+                    ? $"{installed} · checking for a newer version…"
+                    : $"{installed} · installed with {source}";
+        var available = installed is not null && latest is not null;
+        return new StepRow("Install CLI", available ? StepState.Current : StepState.Done, hint, "Update",
+            () => RunSetupCommand(CliSetup.FinishedScript(update, $"{name} CLI update finished.", install.Path)));
+    }
+
+    // Versions are looked up only while Settings is open; the latest one only with Check for updates on.
+    private void RefreshVersions()
+    {
+        if (_sampleStatusLine is not null)
+        {
+            return;
+        }
+
+        _versions.Refresh(QuotaProvider.Claude, _setup.Claude, _setup.Winget, _settings.CheckForUpdates);
+        _versions.Refresh(QuotaProvider.Codex, _setup.Codex, _setup.Winget, _settings.CheckForUpdates);
+    }
+
+    private void OnVersionsChanged()
+    {
+        try
+        {
+            if (_settingsForm is { IsHandleCreated: true, IsDisposed: false } form)
+            {
+                form.BeginInvoke(form.Invalidate);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private StepRow SignInStep(QuotaProvider provider, CliInstall? install, bool done, string hint)
+    {
+        var name = provider == QuotaProvider.Claude ? "Claude" : "Codex";
+        return done ? new StepRow("Sign in", StepState.Done, "Signed in.")
+            : install is null ? new StepRow("Sign in", StepState.Pending, hint)
+            : new StepRow("Sign in", StepState.Current, hint, $"Open {name} CLI", () => OpenCli(provider));
+    }
+
+    private void RunSetupCommand(string command)
+    {
+        if (CliLauncher.Launch(command, null))
+        {
+            PlaySound(SoundCue.Success);
+        }
+        else
+        {
+            ShowNotice("Could not open a terminal.");
+        }
+    }
+
+    private void CopyCommand(string command)
+    {
+        Clipboard.SetText(command);
+        _noticeUrl = null;
+        _tray.ShowBalloonTip(2500, "NeonMon", "Copied. Paste it into PowerShell.", ToolTipIcon.Info);
+    }
+
+    private void ConnectStatusLine()
+    {
+        RefreshCliAvailability();
+        if (StatusLineCommand() is not { } command)
+        {
+            ShowNotice("The status line script is missing next to NeonMon.exe.");
+            return;
+        }
+
+        if (_setup.Node is null)
+        {
+            ShowNotice("Install Node.js first. The status line script runs on it.");
+            return;
+        }
+
+        var current = ClaudeStatusLineConfig.Read(command);
+        using var dialog = new StatusLineConfirmForm(ClaudeStatusLineConfig.SettingsPath,
+            current.State == ClaudeStatusLineState.Other ? current.Command : null, _trayIcon);
+        dialog.ShowDialog(_settingsForm);
+        switch (dialog.Choice)
+        {
+            case StatusLineChoice.CopyInstead:
+                CopyStatusLineSetting();
+                break;
+            case StatusLineChoice.Connect when ClaudeStatusLineConfig.Connect(command) is { } error:
+                ShowNotice(error);
+                break;
+            case StatusLineChoice.Connect:
+                PlaySound(SoundCue.Success);
+                _noticeUrl = null;
+                _tray.ShowBalloonTip(4000, "NeonMon", "Connected. Claude limits arrive the next time you use the claude CLI.", ToolTipIcon.Info);
+                break;
+        }
+
+        RefreshCliAvailability();
+    }
+
+    internal void SaveStatusLinePreview(string path, bool replacing)
+    {
+        using var dialog = new StatusLineConfirmForm(@"C:\Users\you\.claude\settings.json", replacing ? "npx ccstatusline@latest" : null, _trayIcon);
+        dialog.SavePreview(path);
+    }
 
     private string CliDirectory(QuotaProvider provider) =>
         provider == QuotaProvider.Claude ? _quotaSettings.ClaudeCliDirectory : _quotaSettings.CodexCliDirectory;
@@ -1443,14 +1674,13 @@ internal sealed class NeonMonContext : ApplicationContext
 
     private void CopyStatusLineSetting()
     {
-        var script = Path.Combine(AppContext.BaseDirectory, "tools", "neonmon-statusline.js");
-        if (!File.Exists(script))
+        if (StatusLineCommand() is not { } statusLine)
         {
             ShowNotice("The status line script is missing next to NeonMon.exe.");
             return;
         }
 
-        var command = $"node \\\"{script.Replace('\\', '/')}\\\"";
+        var command = statusLine.Replace("\"", "\\\"");
         Clipboard.SetText($"\"statusLine\": {{ \"type\": \"command\", \"command\": \"{command}\" }}");
         _noticeUrl = null;
         _tray.ShowBalloonTip(4000, "NeonMon", "Copied. Paste it into ~/.claude/settings.json. Needs Node.js.", ToolTipIcon.Info);
@@ -1520,6 +1750,8 @@ internal sealed class NeonMonContext : ApplicationContext
             _quotaMenu.Dispose();
             _trayMenu.Dispose();
             _sounds.Dispose();
+            _versions.Changed -= OnVersionsChanged;
+            _versions.Dispose();
         }
 
         base.Dispose(disposing);

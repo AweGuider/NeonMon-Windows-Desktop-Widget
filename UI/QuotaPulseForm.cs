@@ -27,7 +27,12 @@ internal sealed class QuotaPulseForm : WidgetForm
     private Rectangle _codexLaunchArea;
     private bool _claudeCliInstalled = true;
     private bool _codexCliInstalled = true;
+    private bool _claudeStatusLine = true;
     private QuotaProvider? _hoveredLaunch;
+    private Rectangle _setupPanelArea;
+    private Rectangle _claudeSetupArea;
+    private Rectangle _codexSetupArea;
+    private string? _hoveredSetup;
     private bool _pulseOn = true;
     private bool _showResults;
     private Rectangle _quotaTabArea;
@@ -152,21 +157,38 @@ internal sealed class QuotaPulseForm : WidgetForm
 
     internal event Action<QuotaProvider>? CliRequested;
 
-    internal void SetCliAvailability(bool claude, bool codex)
+    internal event Action? SetupRequested;
+
+    internal void SetCliAvailability(bool claude, bool codex, bool claudeStatusLine = true)
     {
-        if (claude == _claudeCliInstalled && codex == _codexCliInstalled)
+        if (claude == _claudeCliInstalled && codex == _codexCliInstalled && claudeStatusLine == _claudeStatusLine)
         {
             return;
         }
 
         _claudeCliInstalled = claude;
         _codexCliInstalled = codex;
+        _claudeStatusLine = claudeStatusLine;
         Invalidate();
     }
 
     private bool IsCliInstalled(QuotaProvider provider) => provider == QuotaProvider.Claude ? _claudeCliInstalled : _codexCliInstalled;
 
     private bool IsMissing(ProviderQuota quota) => !IsCliInstalled(quota.Provider) && !quota.HasData;
+
+    // Claude data only arrives through the status line, so an installed CLI without it still shows nothing.
+    private bool NeedsStatusLine(ProviderQuota quota) =>
+        quota.Provider == QuotaProvider.Claude && _claudeCliInstalled && !_claudeStatusLine && !quota.HasData;
+
+    private bool NeedsSetup(ProviderQuota quota) => !ResultsVisible && (IsMissing(quota) || NeedsStatusLine(quota));
+
+    private bool NothingSetUp => !ResultsVisible && VisibleQuotas.All(IsMissing);
+
+    private string? SetupAt(Point point) =>
+        _setupPanelArea.Contains(point) ? "panel"
+        : _claudeSetupArea.Contains(point) ? "Claude"
+        : _codexSetupArea.Contains(point) ? "Codex"
+        : null;
 
     private QuotaProvider? LaunchAreaAt(Point point) =>
         _claudeLaunchArea.Contains(point) ? QuotaProvider.Claude : _codexLaunchArea.Contains(point) ? QuotaProvider.Codex : null;
@@ -176,6 +198,12 @@ internal sealed class QuotaPulseForm : WidgetForm
         if (_quotaSettings.ResultsTab && (_quotaTabArea.Contains(point) || _resultsTabArea.Contains(point)))
         {
             ShowResults(_resultsTabArea.Contains(point));
+            return true;
+        }
+
+        if (SetupAt(point) is not null)
+        {
+            SetupRequested?.Invoke();
             return true;
         }
 
@@ -190,7 +218,7 @@ internal sealed class QuotaPulseForm : WidgetForm
         }
         else
         {
-            PlaySound(SoundCue.Failure);
+            SetupRequested?.Invoke();
         }
 
         return true;
@@ -208,6 +236,11 @@ internal sealed class QuotaPulseForm : WidgetForm
             return "results tab";
         }
 
+        if (SetupAt(point) is { } setup)
+        {
+            return $"setup {setup}";
+        }
+
         return LaunchAreaAt(point) is { } provider ? $"launch {provider}" : null;
     }
 
@@ -223,14 +256,30 @@ internal sealed class QuotaPulseForm : WidgetForm
             return "Show quests and past weeks";
         }
 
+        var setup = SetupAt(point);
+        SetHoveredSetup(setup);
+        if (setup is not null)
+        {
+            return "Open Setup in Settings";
+        }
+
         var provider = LaunchAreaAt(point);
         SetHoveredLaunch(provider);
         return provider switch
         {
-            QuotaProvider.Claude => _claudeCliInstalled ? "Open the Claude CLI to refresh Claude data" : "Claude CLI not installed",
-            QuotaProvider.Codex => _codexCliInstalled ? "Open the Codex CLI" : "Codex CLI not installed",
+            QuotaProvider.Claude => _claudeCliInstalled ? "Open the Claude CLI to refresh Claude data" : "Set up the Claude CLI",
+            QuotaProvider.Codex => _codexCliInstalled ? "Open the Codex CLI" : "Set up the Codex CLI",
             _ => null
         };
+    }
+
+    private void SetHoveredSetup(string? setup)
+    {
+        if (setup != _hoveredSetup)
+        {
+            _hoveredSetup = setup;
+            Invalidate();
+        }
     }
 
     private void SetHoveredLaunch(QuotaProvider? provider)
@@ -246,6 +295,7 @@ internal sealed class QuotaPulseForm : WidgetForm
     {
         base.OnMouseLeave(e);
         SetHoveredLaunch(null);
+        SetHoveredSetup(null);
     }
 
     internal void RefreshDisplay()
@@ -736,6 +786,17 @@ internal sealed class QuotaPulseForm : WidgetForm
 
         _claudeLaunchArea = Rectangle.Empty;
         _codexLaunchArea = Rectangle.Empty;
+        _setupPanelArea = Rectangle.Empty;
+        _claudeSetupArea = Rectangle.Empty;
+        _codexSetupArea = Rectangle.Empty;
+        if (NothingSetUp)
+        {
+            var lastCard = visible.Length == 2 ? secondCard : firstCard;
+            DrawSetupPanel(graphics, RectangleF.FromLTRB(cardX * scale, (firstCard + BodyShift) * scale, Width - cardX * scale,
+                (lastCard + cardHeight + BodyShift) * scale), size);
+            return;
+        }
+
         for (var index = 0; index < visible.Length; index++)
         {
             var area = Rectangle.Round(new RectangleF(cardX * scale, ((index == 0 ? firstCard : secondCard) + BodyShift) * scale,
@@ -762,6 +823,23 @@ internal sealed class QuotaPulseForm : WidgetForm
         {
             var quota = visible[index];
             var top = ((index == 0 ? firstRow : secondRow) + BodyShift) * scale;
+            var cardTop = ((index == 0 ? firstCard : secondCard) + BodyShift) * scale;
+            if (NeedsSetup(quota))
+            {
+                if (size == WidgetSize.Large)
+                {
+                    DrawLargeCard(graphics, quota, now, top);
+                }
+                else
+                {
+                    DrawCompactCard(graphics, quota, now, top, size);
+                }
+
+                var cellsLeft = size switch { WidgetSize.Small => 68f, WidgetSize.Medium => 112f, _ => 160f };
+                DrawSetupRow(graphics, quota, RectangleF.FromLTRB(cellsLeft * scale, cardTop, Width - cardX * scale, cardTop + cardHeight * scale), size);
+                continue;
+            }
+
             if (size == WidgetSize.Large)
             {
                 DrawLargeCard(graphics, quota, now, top);
@@ -792,6 +870,109 @@ internal sealed class QuotaPulseForm : WidgetForm
                 DrawCompactCell(graphics, quota, quota.FiveHour, now, first, fiveHour: true, size);
                 DrawCompactCell(graphics, quota, quota.Weekly, now, second, fiveHour: false, size);
             }
+        }
+    }
+
+    // Empty state when no visible provider has a CLI or data: one invitation instead of rows of dashes.
+    private void DrawSetupPanel(Graphics graphics, RectangleF area, WidgetSize size)
+    {
+        var scale = DeviceDpi / 96f;
+        _setupPanelArea = Rectangle.Round(area);
+        var hovered = _hoveredSetup == "panel";
+        using (var path = RoundedRectangle(new RectangleF(area.X + 0.5f, area.Y + 0.5f, area.Width - 1, area.Height - 1), 5 * scale))
+        {
+            if (hovered)
+            {
+                using var fill = new SolidBrush(Color.FromArgb(18, 75, 226, 246));
+                graphics.FillPath(fill, path);
+            }
+
+            using var border = new Pen(Color.FromArgb(hovered ? 165 : 72, 75, 226, 246));
+            graphics.DrawPath(border, path);
+        }
+
+        using (var accent = new SolidBrush(Cyan))
+        {
+            graphics.FillRectangle(accent, area.X, area.Y + 8 * scale, 2 * scale, area.Height - 16 * scale);
+        }
+
+        var button = MeasureText(graphics, "Set up", DetailFont) + 20 * scale;
+        var buttonArea = new RectangleF(area.Right - 12 * scale - button, area.Y + area.Height / 2f - 11 * scale, button, 22 * scale);
+        using (var path = RoundedRectangle(buttonArea, 5 * scale))
+        using (var border = new Pen(Cyan))
+        {
+            graphics.DrawPath(border, path);
+        }
+
+        DrawCenteredText(graphics, "Set up", DetailFont, Cyan, Rectangle.Round(buttonArea));
+
+        var left = area.X + 14 * scale;
+        var textWidth = buttonArea.X - 12 * scale - left;
+        var titleHeight = TextLineHeight(graphics, LabelFont, 2 * scale);
+        var detailHeight = TextLineHeight(graphics, DetailFont, 2 * scale);
+        var detail = size == WidgetSize.Small
+            ? "Needs a CLI and a paid plan."
+            : "Quota pulse shows their usage limits. Each needs its CLI and a paid plan.";
+        var lines = size == WidgetSize.Large ? 2 : 1;
+        var top = area.Y + (area.Height - titleHeight - lines * detailHeight) / 2f;
+        DrawText(graphics, "Set up Claude Code or Codex", LabelFont, Foreground, new RectangleF(left, top, textWidth, titleHeight));
+        if (lines == 1)
+        {
+            DrawText(graphics, detail, DetailFont, Muted, new RectangleF(left, top + titleHeight, textWidth, detailHeight));
+        }
+        else
+        {
+            DrawText(graphics, "Quota pulse shows their usage limits.", DetailFont, Muted, new RectangleF(left, top + titleHeight, textWidth, detailHeight));
+            DrawText(graphics, "Each needs its CLI and a paid plan. NeonMon walks you through it.", DetailFont, Muted,
+                new RectangleF(left, top + titleHeight + detailHeight, textWidth, detailHeight));
+        }
+    }
+
+    // Row-level empty state: the metric cells become one line that says what is missing and links to Setup.
+    private void DrawSetupRow(Graphics graphics, ProviderQuota quota, RectangleF area, WidgetSize size)
+    {
+        var scale = DeviceDpi / 96f;
+        var name = quota.Provider == QuotaProvider.Claude ? "Claude" : "Codex";
+        var (message, link) = IsMissing(quota)
+            ? ($"Install the {name} CLI to see {name} limits here.", $"Set up {name}")
+            : ("Claude sends limits through its status line.", "Connect status line");
+        var key = quota.Provider == QuotaProvider.Claude ? "Claude" : "Codex";
+        var hovered = _hoveredSetup == key;
+        if (quota.Provider == QuotaProvider.Claude)
+        {
+            _claudeSetupArea = Rectangle.Round(area);
+        }
+        else
+        {
+            _codexSetupArea = Rectangle.Round(area);
+        }
+
+        using (var path = RoundedRectangle(new RectangleF(area.X + 0.5f, area.Y + 0.5f, area.Width - 1, area.Height - 1), 5 * scale))
+        {
+            if (hovered)
+            {
+                using var fill = new SolidBrush(Color.FromArgb(18, 75, 226, 246));
+                graphics.FillPath(fill, path);
+            }
+
+            using var border = new Pen(Color.FromArgb(hovered ? 165 : 34, 75, 226, 246));
+            graphics.DrawPath(border, path);
+        }
+
+        var detailHeight = TextLineHeight(graphics, DetailFont, 2 * scale);
+        var textTop = area.Y + (area.Height - detailHeight) / 2f;
+        var linkWidth = MeasureText(graphics, link, DetailFont) + 2 * scale;
+        var linkArea = new RectangleF(area.Right - 12 * scale - linkWidth, textTop, linkWidth, detailHeight);
+        DrawText(graphics, link, DetailFont, Ice, linkArea);
+        using (var underline = new Pen(Color.FromArgb(hovered ? 255 : 110, Ice), scale))
+        {
+            var y = textTop + detailHeight - 2 * scale;
+            graphics.DrawLine(underline, linkArea.X, y, linkArea.X + linkWidth - 2 * scale, y);
+        }
+
+        if (size != WidgetSize.Small)
+        {
+            DrawText(graphics, message, DetailFont, Muted, new RectangleF(area.X + 10 * scale, textTop, linkArea.X - 12 * scale - area.X - 10 * scale, detailHeight));
         }
     }
 
@@ -1072,7 +1253,7 @@ internal sealed class QuotaPulseForm : WidgetForm
             }
 
             var note = EndpointNote(quota, now);
-            var age = IsMissing(quota) ? "CLI not installed" : note is null ? AgeText(quota, now) : note[^1];
+            var age = IsMissing(quota) ? "not set up" : NeedsStatusLine(quota) ? "no data yet" : note is null ? AgeText(quota, now) : note[^1];
             DrawText(graphics, age, DetailFont, IsMissing(quota) ? Muted : AgeColor(quota, now), new RectangleF(14 * scale, top + 23 * scale, 92 * scale, TextLineHeight(graphics, DetailFont, 2 * scale)));
         }
     }
@@ -1141,9 +1322,9 @@ internal sealed class QuotaPulseForm : WidgetForm
                 DrawText(graphics, note[i], DetailFont, Warning, new RectangleF(left, lineTop + (i + 1) * 14 * scale, 132 * scale, detailHeight));
             }
         }
-        else if (IsMissing(quota))
+        else if (IsMissing(quota) || NeedsStatusLine(quota))
         {
-            DrawText(graphics, "CLI not installed", DetailFont, Muted, new RectangleF(left, lineTop, 132 * scale, detailHeight));
+            DrawText(graphics, IsMissing(quota) ? "not set up" : "no data yet", DetailFont, Muted, new RectangleF(left, lineTop, 132 * scale, detailHeight));
         }
         else
         {

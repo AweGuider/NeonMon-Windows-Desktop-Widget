@@ -12,7 +12,7 @@ internal static class Program
     private const string InstanceMutexName = @"Local\NeonMon.Instance";
     private const string OpenSignalName = @"Local\NeonMon.Open";
     private const string ExitSignalName = @"Local\NeonMon.Exit";
-    private static readonly string[] ToolArguments = ["--render-settings", "--render-preview", "--render-peek-preview", "--self-test", "--dump-quota", "--dump-monitors", "--export-icon"];
+    private static readonly string[] ToolArguments = ["--render-settings", "--render-preview", "--render-statusline-confirm", "--render-peek-preview", "--self-test", "--dump-quota", "--dump-monitors", "--export-icon"];
 
     [STAThread]
     private static int Main(string[] args)
@@ -85,6 +85,12 @@ internal static class Program
             return 0;
         }
 
+        if (ArgumentValue(args, "--render-statusline-confirm") is { } confirmPath)
+        {
+            context.SaveStatusLinePreview(confirmPath, args.Contains("--replace", StringComparer.OrdinalIgnoreCase));
+            return 0;
+        }
+
         WidgetForm previewTarget = string.Equals(ArgumentValue(args, "--strip"), "quota", StringComparison.OrdinalIgnoreCase)
             ? context.QuotaForm
             : context.SystemForm;
@@ -127,6 +133,11 @@ internal static class Program
             }
 
             PreparePreview(context, telemetry, quota, useSample);
+            if (useSample)
+            {
+                PrepareSetupPreview(context, ArgumentValue(args, "--setup"));
+            }
+
             if (string.Equals(ArgumentValue(args, "--view"), "results", StringComparison.OrdinalIgnoreCase))
             {
                 context.QuotaForm.ShowResults(true);
@@ -191,6 +202,20 @@ internal static class Program
                 if (!SelfTestMonitorIdentity())
                 {
                     return 11;
+                }
+
+                if (!SelfTestStatusLineConnect())
+                {
+                    return 12;
+                }
+
+                if (!(CliVersions.IsNewer("2.1.323", "2.1.310") && CliVersions.IsNewer("0.169.0", "0.130.0-alpha.5")
+                      && CliVersions.IsNewer("1.0.0", "1.0.0-beta") && !CliVersions.IsNewer("1.0.0", "1.0.0")
+                      && !CliVersions.IsNewer("0.167.2", "0.169.0") && !CliVersions.IsNewer("unknown", "1.0.0")
+                      && CliVersions.FirstVersion("codex-cli 0.130.0-alpha.5") == "0.130.0-alpha.5"
+                      && CliVersions.FirstVersion("2.1.323 (Claude Code)") == "2.1.323"))
+                {
+                    return 13;
                 }
 
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
@@ -269,6 +294,71 @@ internal static class Program
         else
         {
             context.QuotaForm.SetSnapshot(quota.RefreshAllAsync().GetAwaiter().GetResult());
+        }
+    }
+
+    // Connects in a temporary folder: other settings and their text survive, the old file is backed up, and the
+    // status line is replaced; a file with comments is refused untouched.
+    private static bool SelfTestStatusLineConnect()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), $"neonmon-selftest-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(folder);
+            var settings = Path.Combine(folder, "settings.json");
+            const string original = """{ "model": "opus", "env": { "A": "b<c>" }, "statusLine": { "type": "command", "command": "other" } }""";
+            File.WriteAllText(settings, original);
+            const string command = "node \"C:/NeonMon/tools/neonmon-statusline.js\"";
+            var connected = ClaudeStatusLineConfig.Connect(command, settings) is null;
+            using var written = JsonDocument.Parse(File.ReadAllText(settings));
+            var root = written.RootElement;
+            var kept = root.GetProperty("model").GetString() == "opus" && root.GetProperty("env").GetProperty("A").GetString() == "b<c>"
+                && File.ReadAllText(settings).Contains("b<c>");
+            var replaced = root.GetProperty("statusLine").GetProperty("command").GetString() == command
+                && ClaudeStatusLineConfig.Read(command, settings).State == ClaudeStatusLineState.NeonMon;
+            var backedUp = File.ReadAllText(settings + ClaudeStatusLineConfig.BackupSuffix) == original;
+
+            var commented = Path.Combine(folder, "commented.json");
+            const string withComment = "{ // mine\n \"model\": \"opus\" }";
+            File.WriteAllText(commented, withComment);
+            var refused = ClaudeStatusLineConfig.Connect(command, commented) is not null && File.ReadAllText(commented) == withComment;
+            return connected && kept && replaced && backedUp && refused;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    // --setup none: no CLI found; claude: Claude CLI missing; statusline: Claude CLI found but its status line not connected.
+    private static void PrepareSetupPreview(NeonMonContext context, string? setup)
+    {
+        var sample = QuotaSnapshot.Sample(TelemetrySnapshot.Sample.CapturedAt);
+        var noClaude = new ProviderQuota { Provider = QuotaProvider.Claude };
+        switch (setup?.ToLowerInvariant())
+        {
+            case "none":
+                context.QuotaForm.SetCliAvailability(false, false);
+                context.QuotaForm.SetSnapshot(new QuotaSnapshot(noClaude, new ProviderQuota { Provider = QuotaProvider.Codex }));
+                break;
+            case "claude":
+                context.QuotaForm.SetCliAvailability(false, true);
+                context.QuotaForm.SetSnapshot(sample with { Claude = noClaude });
+                break;
+            case "statusline":
+                context.QuotaForm.SetCliAvailability(true, true, claudeStatusLine: false);
+                context.QuotaForm.SetSnapshot(sample with { Claude = noClaude });
+                break;
         }
     }
 

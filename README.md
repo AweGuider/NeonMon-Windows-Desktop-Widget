@@ -78,11 +78,22 @@ More screenshots are in the [gallery](docs/gallery.md), and the [devlog](docs/de
 | Weekly pace and daily quest | Yes | No | No | No |
 | System stats (CPU, GPU, memory, disk) | Yes | No | No | No |
 
+## Setting up Claude Code or Codex
+
+Quota pulse needs the Claude Code CLI, the Codex CLI, or both, and each needs a paid plan: Claude Pro, Max, Team, Enterprise, or a Console account; ChatGPT Plus, Pro, Business, Edu, or Enterprise. When neither CLI is found, Quota pulse shows **Set up** instead of empty rows, and it links to **Settings → Quota pulse → Setup**:
+
+- **Install CLI** opens a terminal you can watch, with `winget install Anthropic.ClaudeCode` or `winget install OpenAI.Codex`. **Update** later runs the matching update command for how the CLI was installed (winget, npm, or Anthropic's installer). While Settings is open, the step shows the installed version and, when **Check for updates** is on, the latest one from the same channel (winget's catalog or the npm registry), and the button disappears once you're up to date. The terminal ends with a one-line result and closes when you press Enter. Tools run by their full path (`npm.cmd`, not `npm`), so PowerShell's default execution policy doesn't block them, and a button only appears when its tool is on this PC. NeonMon never downloads or installs anything in the background.
+- **Sign in** opens the CLI so you can sign in with your browser. It shows as done once that provider's limits arrive; NeonMon never opens either CLI's sign-in files.
+- **Node.js** and **Connect status line** (Claude only) install Node.js with winget and, after you confirm, add NeonMon's status line to `~/.claude/settings.json`. A copy of the file is saved as `settings.json.neonmon-backup` first, and any status line it replaces is shown before you confirm.
+- **Other ways to install** lists Anthropic's and OpenAI's own installers, and npm commands when npm is installed, to copy. It opens by itself when winget isn't available.
+
+NeonMon finds each CLI on PATH (including PATH changes made after it started) and in the folders winget, npm, and the official installers use.
+
 ## Quota pulse data sources
 
 Quota pulse never calls a model and never uses API keys. Its sources are local:
 
-- **Claude Code:** the plan limits Claude Code passes to its status line. This needs [Node.js](https://nodejs.org). The script ships as `tools\neonmon-statusline.js` next to `NeonMon.exe`, and **Copy setting** in **Settings → Quota pulse** copies the line below with the right path. Paste it into `~/.claude/settings.json`; it replaces any status line you already have:
+- **Claude Code:** the plan limits Claude Code passes to its status line. This needs [Node.js](https://nodejs.org). The script ships as `tools\neonmon-statusline.js` next to `NeonMon.exe`, and **Connect status line** in **Settings → Quota pulse → Setup** adds it for you. To do it by hand, **Copy setting** in **Settings → Quota pulse → Claude** copies the line below with the right path. Paste it into `~/.claude/settings.json`; it replaces any status line you already have:
 
   ```json
   "statusLine": { "type": "command", "command": "node \"<path-to-NeonMon>/tools/neonmon-statusline.js\"" }

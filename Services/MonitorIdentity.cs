@@ -34,10 +34,13 @@ internal static class MonitorIdentity
 
     public static string? FriendlyName(Screen screen) => EdidName(ReadEdid(DevicePath(screen)));
 
-    public static Screen? Find(MonitorKey? key) =>
-        Match(key, Ordered().Select(screen => (screen, Identify(screen))));
+    public static Screen? Find(MonitorKey? key, bool layoutFirst) =>
+        Match(key, Ordered().Select(screen => (screen, Identify(screen))), layoutFirst);
 
-    public static T? Match<T>(MonitorKey? key, IEnumerable<(T Item, MonitorKey Key)> candidates) where T : class
+    // Twin monitors with a placeholder serial share one EDID key, so that key only decides when it is unique.
+    // Remote Desktop numbers its Default_Monitor paths in the client's monitor order, so a remote slot trusts the
+    // layout before the path.
+    public static T? Match<T>(MonitorKey? key, IEnumerable<(T Item, MonitorKey Key)> candidates, bool layoutFirst) where T : class
     {
         if (key is null)
         {
@@ -45,14 +48,26 @@ internal static class MonitorIdentity
         }
 
         var list = candidates.ToList();
-        return First(key.Edid, candidate => candidate.Edid)
-            ?? First(key.DevicePath, candidate => candidate.DevicePath)
-            ?? First(key.Layout, candidate => candidate.Layout);
+        var twins = Matching(list, key.Edid, candidate => candidate.Edid);
+        if (twins.Count == 1)
+        {
+            return twins[0].Item;
+        }
 
-        T? First(string? wanted, Func<MonitorKey, string?> field) => wanted is null
-            ? null
-            : list.FirstOrDefault(candidate => string.Equals(field(candidate.Key), wanted, StringComparison.OrdinalIgnoreCase)).Item;
+        return (twins.Count > 1 ? ByPlace(twins, key, layoutFirst) : null) ?? ByPlace(list, key, layoutFirst);
     }
+
+    private static T? ByPlace<T>(List<(T Item, MonitorKey Key)> candidates, MonitorKey key, bool layoutFirst) where T : class
+    {
+        var byPath = Matching(candidates, key.DevicePath, candidate => candidate.DevicePath).FirstOrDefault().Item;
+        var byLayout = Matching(candidates, key.Layout, candidate => candidate.Layout).FirstOrDefault().Item;
+        return layoutFirst ? byLayout ?? byPath : byPath ?? byLayout;
+    }
+
+    private static List<(T Item, MonitorKey Key)> Matching<T>(List<(T Item, MonitorKey Key)> candidates, string? wanted, Func<MonitorKey, string?> field) =>
+        wanted is null
+            ? []
+            : candidates.Where(candidate => string.Equals(field(candidate.Key), wanted, StringComparison.OrdinalIgnoreCase)).ToList();
 
     public static string? EdidKey(byte[]? edid)
     {

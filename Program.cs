@@ -50,8 +50,13 @@ internal static class Program
             return 0;
         }
 
-        if (ArgumentValue(args, "--dump-monitors") is { } monitorsPath)
+        if (args.Contains("--dump-monitors", StringComparer.OrdinalIgnoreCase))
         {
+            if (ArgumentValue(args, "--dump-monitors") is not { } monitorsPath)
+            {
+                return 1;
+            }
+
             File.WriteAllText(monitorsPath, MonitorIdentity.Dump());
             return 0;
         }
@@ -461,19 +466,37 @@ internal static class Program
             ("primary", new MonitorKey(null, @"\\?\DISPLAY#Default_Monitor#1&1&UID256#{x}", "3840x2160@0,0")),
             ("side", new MonitorKey(null, @"\\?\DISPLAY#Default_Monitor#1&1&UID257#{x}", "1920x1200@3840,766"))
         ];
-        var matched = MonitorIdentity.Match(new MonitorKey("DELA07A:2", @"\\?\DISPLAY#DELA07A#4&1&UID1#{x}", "1920x1200@-1920,0"), console) == "right"
-            && MonitorIdentity.Match(new MonitorKey("DELA07A:9", @"\\?\DISPLAY#GSM7750#4&1&UID3#{x}", "1920x1200@-1920,0"), console) == "plain"
-            && MonitorIdentity.Match(new MonitorKey("DELA07A:9", "gone", "1920x1200@-1920,0"), console) == "left"
-            && MonitorIdentity.Match(new MonitorKey(null, null, "800x600@0,0"), console) is null
-            && MonitorIdentity.Match(null, console) is null
-            && MonitorIdentity.Match(new MonitorKey(null, @"\\?\DISPLAY#Default_Monitor#1&1&UID999#{x}", "1920x1200@3840,766"), remote) == "side";
+        (string, MonitorKey)[] twins =
+        [
+            ("twinLeft", new MonitorKey("DELA07A:16843009", @"\\?\DISPLAY#DELA07A#4&1&UID1#{x}", "1920x1200@-1920,0")),
+            ("twinRight", new MonitorKey("DELA07A:16843009", @"\\?\DISPLAY#DELA07A#4&1&UID2#{x}", "1920x1200@3840,0")),
+            ("plain", new MonitorKey(null, @"\\?\DISPLAY#GSM7750#4&1&UID3#{x}", "3840x2160@0,0"))
+        ];
+        var matched = MonitorIdentity.Match(new MonitorKey("DELA07A:2", @"\\?\DISPLAY#DELA07A#4&1&UID1#{x}", "1920x1200@-1920,0"), console, false) == "right"
+            && MonitorIdentity.Match(new MonitorKey("DELA07A:9", @"\\?\DISPLAY#GSM7750#4&1&UID3#{x}", "1920x1200@-1920,0"), console, false) == "plain"
+            && MonitorIdentity.Match(new MonitorKey("DELA07A:9", "gone", "1920x1200@-1920,0"), console, false) == "left"
+            && MonitorIdentity.Match(new MonitorKey(null, null, "800x600@0,0"), console, false) is null
+            && MonitorIdentity.Match(null, console, false) is null
+            && MonitorIdentity.Match(new MonitorKey(null, @"\\?\DISPLAY#Default_Monitor#1&1&UID999#{x}", "1920x1200@3840,766"), remote, true) == "side"
+            && MonitorIdentity.Match(twins[1].Item2, twins, false) == "twinRight"
+            && MonitorIdentity.Match(new MonitorKey("DELA07A:16843009", "gone", "1920x1200@-1920,0"), twins, false) == "twinLeft"
+            && MonitorIdentity.Match(new MonitorKey(null, remote[0].Item2.DevicePath, remote[1].Item2.Layout), remote, true) == "side"
+            && MonitorIdentity.Match(new MonitorKey(null, remote[0].Item2.DevicePath, remote[1].Item2.Layout), remote, false) == "primary";
 
         var saved = JsonSerializer.Deserialize<StripSettings>(JsonSerializer.Serialize(new StripSettings { RemoteMonitor = remote[1].Item2 }));
         var legacy = JsonSerializer.Deserialize<StripSettings>("""{"Monitor":"\\\\.\\DISPLAY2"}""");
         var stored = saved is { ConsoleMonitor: null } && saved.RemoteMonitor == remote[1].Item2
             && legacy is { Monitor: @"\\.\DISPLAY2", ConsoleMonitor: null, RemoteMonitor: null };
 
-        return parsed && numericSerial && noSerial && matched && stored;
+        var other = new StripSettings { Monitor = @"\\.\DISPLAY2" };
+        var migrated = WidgetForm.MigrateLegacyMonitor(legacy!, @"\\.\DISPLAY2", false, () => console[1].Item2)
+            && legacy is { Monitor: @"\\.\DISPLAY2", RemoteMonitor: null } && legacy.ConsoleMonitor == console[1].Item2
+            && WidgetForm.MigrateLegacyMonitor(legacy, @"\\.\DISPLAY2", true, () => remote[1].Item2)
+            && legacy is { Monitor: null } && legacy.RemoteMonitor == remote[1].Item2
+            && !WidgetForm.MigrateLegacyMonitor(other, @"\\.\DISPLAY1", false, () => console[0].Item2)
+            && other is { Monitor: @"\\.\DISPLAY2", ConsoleMonitor: null, RemoteMonitor: null };
+
+        return parsed && numericSerial && noSerial && matched && stored && migrated;
     }
 
     private static string? ArgumentValue(string[] args, string name)

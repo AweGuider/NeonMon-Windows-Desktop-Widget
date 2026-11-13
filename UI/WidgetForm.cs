@@ -308,22 +308,32 @@ internal abstract class WidgetForm : Form
         var key = remote ? Settings.RemoteMonitor : Settings.ConsoleMonitor;
         if (key is not null)
         {
-            return MonitorIdentity.Find(key) ?? ScreenNamed(null);
+            return MonitorIdentity.Find(key, remote) ?? ScreenNamed(null);
         }
 
         var screen = ScreenNamed(Settings.Monitor ?? unsavedDeviceName);
-        if (Settings.Monitor is { } legacy && screen.DeviceName == legacy)
+        if (MigrateLegacyMonitor(Settings, screen.DeviceName, remote, () => MonitorIdentity.Identify(screen)))
         {
-            StoreMonitor(screen, remote);
-            if (Settings.ConsoleMonitor is not null && Settings.RemoteMonitor is not null)
-            {
-                Settings.Monitor = null;
-            }
-
             _monitorMigrated = true;
         }
 
         return screen;
+    }
+
+    internal static bool MigrateLegacyMonitor(StripSettings settings, string deviceName, bool remote, Func<MonitorKey> identify)
+    {
+        if (settings.Monitor is not { } legacy || deviceName != legacy)
+        {
+            return false;
+        }
+
+        StoreMonitor(settings, identify(), remote);
+        if (settings.ConsoleMonitor is not null && settings.RemoteMonitor is not null)
+        {
+            settings.Monitor = null;
+        }
+
+        return true;
     }
 
     private static Screen ScreenNamed(string? deviceName) =>
@@ -331,16 +341,17 @@ internal abstract class WidgetForm : Form
         ?? Screen.PrimaryScreen
         ?? Screen.AllScreens[0];
 
-    private void StoreMonitor(Screen screen, bool remote)
+    private void StoreMonitor(Screen screen, bool remote) => StoreMonitor(Settings, MonitorIdentity.Identify(screen), remote);
+
+    private static void StoreMonitor(StripSettings settings, MonitorKey key, bool remote)
     {
-        var key = MonitorIdentity.Identify(screen);
         if (remote)
         {
-            Settings.RemoteMonitor = key;
+            settings.RemoteMonitor = key;
         }
         else
         {
-            Settings.ConsoleMonitor = key;
+            settings.ConsoleMonitor = key;
         }
     }
 
